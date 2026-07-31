@@ -79,6 +79,13 @@ export default function Home() {
     e.currentTarget.classList.remove("border-violet-400", "bg-violet-500/10");
   };
 
+  const handleReset = useCallback(() => {
+    setProducts([]);
+    setValidation(null);
+    setCsvFileName(null);
+    setStatus("idle");
+  }, []);
+
   const handleExport = async () => {
     if (products.length === 0) return;
     setExporting(true);
@@ -192,6 +199,7 @@ export default function Home() {
             products={products}
             onProductsUpdate={handleProductsUpdate}
             onStatusChange={handleStatusChange}
+            onReset={handleReset}
           />
         </div>
 

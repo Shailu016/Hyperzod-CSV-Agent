@@ -11,6 +11,7 @@ interface ChatPanelProps {
     clarifyingQuestion?: string
   ) => void;
   onStatusChange: (status: "idle" | "loading" | "error") => void;
+  onReset: () => void;
 }
 
 interface ChatMessage {
@@ -24,6 +25,7 @@ export default function ChatPanel({
   products,
   onProductsUpdate,
   onStatusChange,
+  onReset,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -127,12 +129,29 @@ export default function ChatPanel({
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-violet-500/25">
           <i className="fas fa-wand-magic-sparkles text-sm"></i>
         </div>
-        <div>
+        <div className="flex-1">
           <h2 className="font-bold text-sm text-white">CSV Agent</h2>
           <p className="text-xs text-slate-400">
             Describe products, get a ready-to-import CSV
           </p>
         </div>
+        <button
+          onClick={() => {
+            setMessages([
+              {
+                role: "assistant",
+                content:
+                  "Describe the products you want — a whole collection, or just one item. You can also upload an existing CSV to edit it.",
+                timestamp: Date.now(),
+              },
+            ]);
+            onReset();
+          }}
+          title="New chat"
+          className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition-colors flex items-center justify-center"
+        >
+          <i className="fas fa-plus text-xs"></i>
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
