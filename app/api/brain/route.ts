@@ -212,7 +212,7 @@ async function callDeepSeek(
 ): Promise<{ text: string | null; error: string | null }> {
   const url = "https://api.deepseek.com/v1/chat/completions";
   const payload = {
-    model: "deepseek-chat",
+    model: "deepseek-v4-flash",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userMessage },
