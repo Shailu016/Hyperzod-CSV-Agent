@@ -14,6 +14,8 @@ export default function Home() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [csvFileName, setCsvFileName] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [previewCsv, setPreviewCsv] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const runValidation = useCallback((prods: Product[]) => {
@@ -62,7 +64,7 @@ export default function Home() {
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    e.currentTarget.classList.remove("border-violet-400", "bg-violet-500/10");
+    e.currentTarget.classList.remove("border-white/30", "bg-white/5");
     const file = e.dataTransfer.files[0];
     if (file && file.name.endsWith(".csv")) {
       handleFileUpload(file);
@@ -71,12 +73,12 @@ export default function Home() {
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.currentTarget.classList.add("border-violet-400", "bg-violet-500/10");
+    e.currentTarget.classList.add("border-white/30", "bg-white/5");
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
-    e.currentTarget.classList.remove("border-violet-400", "bg-violet-500/10");
+    e.currentTarget.classList.remove("border-white/30", "bg-white/5");
   };
 
   const handleReset = useCallback(() => {
@@ -85,6 +87,23 @@ export default function Home() {
     setCsvFileName(null);
     setStatus("idle");
   }, []);
+
+  const handlePreview = async () => {
+    if (products.length === 0) return;
+    try {
+      const res = await fetch("/api/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(products),
+      });
+      if (!res.ok) throw new Error("Preview failed");
+      const text = await res.text();
+      setPreviewCsv(text);
+      setPreviewOpen(true);
+    } catch {
+      // silently fail
+    }
+  };
 
   const handleExport = async () => {
     if (products.length === 0) return;
@@ -115,16 +134,16 @@ export default function Home() {
   const readinessText =
     products.length === 0
       ? "No products yet"
-      : validation?.valid
-        ? `${products.length} product${products.length > 1 ? "s" : ""} ready to export`
-        : `${products.length} product${products.length > 1 ? "s" : ""}, ${validation?.errorCount ?? 0} issue${(validation?.errorCount ?? 1) > 1 ? "s" : ""} need review`;
+      : validation && validation.errorCount > 0
+        ? `${products.length} product${products.length > 1 ? "s" : ""}, ${validation.errorCount} issue${validation.errorCount > 1 ? "s" : ""} need review`
+        : `${products.length} product${products.length > 1 ? "s" : ""} ready to export`;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Top Bar */}
       <header className="h-14 shrink-0 bg-slate-950/95 border-b border-white/10 flex items-center justify-between px-6 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
+          <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white">
             <i className="fas fa-wand-magic-sparkles text-xs text-white"></i>
           </div>
           <div>
@@ -134,7 +153,7 @@ export default function Home() {
           </div>
           {csvFileName && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-slate-400 border border-white/10">
-              <i className="fas fa-file-csv mr-1 text-violet-400"></i>
+              <i className="fas fa-file-csv mr-1 text-neutral-400"></i>
               {csvFileName}
             </span>
           )}
@@ -157,18 +176,27 @@ export default function Home() {
           </div>
 
           {products.length > 0 && (
-            <button
-              onClick={handleExport}
-              disabled={exporting}
-              className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-xs font-semibold hover:shadow-lg hover:shadow-emerald-500/25 transition-all disabled:opacity-50"
-            >
-              {exporting ? (
-                <i className="fas fa-spinner fa-spin mr-1.5"></i>
-              ) : (
-                <i className="fas fa-download mr-1.5"></i>
-              )}
-              Export CSV
-            </button>
+            <>
+              <button
+                onClick={handlePreview}
+                className="px-4 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-xs font-medium hover:bg-white/10 hover:text-white transition-colors"
+              >
+                <i className="fas fa-eye mr-1.5"></i>
+                Preview CSV
+              </button>
+              <button
+                onClick={handleExport}
+                disabled={exporting}
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
+              >
+                {exporting ? (
+                  <i className="fas fa-spinner fa-spin mr-1.5"></i>
+                ) : (
+                  <i className="fas fa-download mr-1.5"></i>
+                )}
+                Export CSV
+              </button>
+            </>
           )}
 
           <button
@@ -245,7 +273,7 @@ export default function Home() {
 
           {products.length === 0 && (
             <div
-              className="flex-1 flex flex-col items-center justify-center p-8 border-2 border-dashed border-white/10 rounded-xl m-6 cursor-pointer hover:border-violet-500/40 hover:bg-violet-500/5 transition-all"
+              className="flex-1 flex flex-col items-center justify-center p-8 border-2 border-dashed border-white/10 rounded-xl m-6 cursor-pointer hover:border-white/30 hover:bg-white/5 transition-all"
               onDrop={handleDrop}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -272,6 +300,46 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* CSV Preview Modal */}
+      {previewOpen && previewCsv && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-[#2f2f2f] border border-white/10 rounded-2xl w-[90vw] max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <h2 className="text-sm font-semibold text-white">
+                <i className="fas fa-file-csv mr-2 text-emerald-400"></i>
+                CSV Preview — {products.length} product
+                {products.length > 1 ? "s" : ""}, {previewCsv.split("\n").length} lines
+              </h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExport}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-500 transition-colors"
+                >
+                  <i className="fas fa-download mr-1"></i>Download
+                </button>
+                <button
+                  onClick={() => setPreviewOpen(false)}
+                  className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition-colors flex items-center justify-center"
+                >
+                  <i className="fas fa-times text-xs"></i>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <pre className="text-xs font-mono text-slate-300 bg-[#1a1a1a] rounded-xl p-4 overflow-x-auto whitespace-pre leading-relaxed">
+                {previewCsv}
+              </pre>
+            </div>
+            <div className="px-6 py-3 border-t border-white/10 text-[10px] text-slate-500 flex items-center gap-4">
+              <span>
+                <i className="fas fa-info-circle mr-1"></i>
+                Import this file via Hyperzod Admin → Catalogue → Import → CSV Import
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

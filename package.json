@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx fixtures/golden/run-tests.ts"
   },
   "dependencies": {
     "next": "14.2.21",

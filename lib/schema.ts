@@ -4,8 +4,7 @@ export interface ProductVariant {
   name: string;
   price: number;
   costPrice?: number;
-  minQty: number;
-  maxQty?: number;
+  inventory: number;
   description?: string;
   imageUrl?: string;
   nestedOptions?: ProductOption[];
@@ -26,8 +25,7 @@ export const ProductVariantSchema: z.ZodType<any> = z.object({
   name: z.string().min(1),
   price: z.number().default(0),
   costPrice: z.number().optional(),
-  minQty: z.number().default(0),
-  maxQty: z.number().optional(),
+  inventory: z.number().default(0),
   description: z.string().optional().default(""),
   imageUrl: z.string().optional().default(""),
   nestedOptions: z.array(z.lazy(() => ProductOptionSchema)).optional().default([]),

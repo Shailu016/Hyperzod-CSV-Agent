@@ -1,5 +1,6 @@
 import { generateCSV } from "../../lib/generator";
 import { validateProducts } from "../../lib/validator";
+import { parseCSV } from "../../lib/parser";
 import type { Product } from "../../lib/schema";
 
 // Golden fixture: Simple product with no options
@@ -37,9 +38,9 @@ const fixture2: Product[] = [
         required: true,
         view: "list",
         variants: [
-          { name: "Small", price: 0, minQty: 0, description: "10 inch" },
-          { name: "Medium", price: 100, minQty: 0, description: "12 inch" },
-          { name: "Large", price: 200, minQty: 0, description: "14 inch" },
+          { name: "Small", price: 0, inventory: 50, description: "10 inch" },
+          { name: "Medium", price: 100, inventory: 50, description: "12 inch" },
+          { name: "Large", price: 200, inventory: 50, description: "14 inch" },
         ],
       },
     ],
@@ -68,7 +69,7 @@ const fixture3: Product[] = [
           {
             name: "Core i5",
             price: 0,
-            minQty: 0,
+            inventory: 30,
             description: "10th Gen i5",
             nestedOptions: [
               {
@@ -79,8 +80,8 @@ const fixture3: Product[] = [
                 required: false,
                 view: "list",
                 variants: [
-                  { name: "8GB DDR4", price: 0, minQty: 0 },
-                  { name: "16GB DDR4", price: 2500, minQty: 0 },
+                  { name: "8GB DDR4", price: 0, inventory: 30 },
+                  { name: "16GB DDR4", price: 2500, inventory: 30 },
                 ],
               },
             ],
@@ -88,7 +89,7 @@ const fixture3: Product[] = [
           {
             name: "Core i7",
             price: 8000,
-            minQty: 0,
+            inventory: 20,
             description: "12th Gen i7",
             nestedOptions: [
               {
@@ -99,8 +100,8 @@ const fixture3: Product[] = [
                 required: false,
                 view: "list",
                 variants: [
-                  { name: "16GB DDR4", price: 0, minQty: 0 },
-                  { name: "32GB DDR4", price: 5000, minQty: 0 },
+                  { name: "16GB DDR4", price: 0, inventory: 20 },
+                  { name: "32GB DDR4", price: 5000, inventory: 20 },
                 ],
               },
             ],
@@ -155,8 +156,8 @@ const csv2 = generateCSV(fixture2);
 console.log(csv2.slice(0, 800));
 console.assert(csv2.includes("Pizza Size"), "Should contain option name");
 console.assert(
-  csv2.includes("Small,0,0,0,10 inch,"),
-  "Should contain variant string"
+  csv2.includes("Small,0.00,0.00,50,10 inch,"),
+  "Should contain variant string with inventory and 2dp prices"
 );
 console.assert(csv2.includes(" ; "), "Should use semicolon separator");
 console.log("PASS: Size variants");
@@ -194,5 +195,70 @@ console.assert(
   "Should catch price compare issue"
 );
 console.log(`PASS: Caught price compare error`);
+
+console.log("\n7. Round-trip: generate → parse → generate preserves nested view:");
+const reparsed = parseCSV(csv3);
+console.assert(
+  reparsed.length === 1,
+  `Should parse 1 product, got ${reparsed.length}`
+);
+const nested = reparsed[0]?.options?.[0]?.variants?.[0]?.nestedOptions?.[0];
+console.assert(
+  nested?.view === "list",
+  `Nested option view should be preserved, got "${nested?.view}"`
+);
+const csv3again = generateCSV(reparsed);
+console.assert(
+  csv3again.includes("list (8GB DDR4"),
+  "Re-exported nested option should retain view token"
+);
+console.log("PASS: Round-trip");
+
+console.log("\n8. CSV formula injection guard:");
+const injectFixture: Product[] = [
+  {
+    name: "=HYPERLINK(http://evil)",
+    sellingPrice: 100,
+    costPrice: 40,
+    status: "active",
+    category: "+SUM(A1)",
+    tags: ["@import", "-2+3"],
+    _fieldConfidence: {},
+  },
+];
+const csvInj = generateCSV(injectFixture);
+console.assert(
+  csvInj.includes("'=HYPERLINK"),
+  "Formula-leading name should be quoted with apostrophe prefix"
+);
+console.assert(
+  csvInj.includes("'+SUM"),
+  "Formula-leading category should be neutralized"
+);
+console.assert(
+  csvInj.includes("'@import"),
+  "Tag starting with @ should be neutralized"
+);
+console.log("PASS: Formula injection");
+
+console.log("\n9. Multi-line quoted description round-trip:");
+const multiLineFixture: Product[] = [
+  {
+    name: "Multi-line desc",
+    description: "Line one\nLine two",
+    sellingPrice: 99,
+    costPrice: 40,
+    status: "active",
+    category: "Test",
+    _fieldConfidence: {},
+  },
+];
+const csvML = generateCSV(multiLineFixture);
+const reparsedML = parseCSV(csvML);
+console.assert(
+  reparsedML[0]?.description === "Line one\nLine two",
+  `Multi-line description should survive round-trip, got "${reparsedML[0]?.description}"`
+);
+console.log("PASS: Multi-line description");
 
 console.log("\n=== All Tests Passed ===");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useRef } from "react";
 import type { Product, ProductOption, ProductVariant } from "@/lib/schema";
 import type { ValidationResult, ValidationIssue } from "@/lib/validator";
 
@@ -20,32 +20,64 @@ export default function ProductGrid({
     field: string;
   } | null>(null);
   const [editValue, setEditValue] = useState("");
+  const editRef = useRef<{ row: number; field: string } | null>(null);
+
+  const issueMap = useMemo(() => {
+    const map = new Map<string, ValidationIssue[]>();
+    if (!validation) return map;
+    for (const issue of [...validation.errors, ...validation.warnings]) {
+      const key = `${issue.rowIndex}:${issue.field}`;
+      const list = map.get(key);
+      if (list) list.push(issue);
+      else map.set(key, [issue]);
+    }
+    return map;
+  }, [validation]);
 
   const handleCellClick = (rowIndex: number, field: string, value: unknown) => {
     setEditingCell({ row: rowIndex, field });
+    editRef.current = { row: rowIndex, field };
     setEditValue(value != null ? String(value) : "");
   };
 
-  const handleCellSave = (rowIndex: number, field: string) => {
+  const commitCell = (rowIndex: number, field: string) => {
+    if (!editRef.current || editRef.current.row !== rowIndex || editRef.current.field !== field) {
+      return;
+    }
     const updated = [...products];
     const product = { ...updated[rowIndex] };
 
-    let newValue: unknown = editValue;
-    if (
-      field === "sellingPrice" ||
-      field === "costPrice" ||
-      field === "taxPercent"
-    ) {
-      newValue = parseFloat(editValue) || 0;
+    if (field === "sellingPrice" || field === "costPrice" || field === "taxPercent") {
+      const parsed = parseFloat(editValue);
+      if (editValue.trim() === "" || isNaN(parsed)) {
+        // Invalid input — revert, don't clobber with 0
+        editRef.current = null;
+        setEditingCell(null);
+        return;
+      }
+      (product as Record<string, unknown>)[field] = parsed;
     } else if (field === "inventory") {
-      newValue = parseInt(editValue, 10) || 0;
+      const parsed = parseInt(editValue, 10);
+      if (editValue.trim() === "" || isNaN(parsed)) {
+        editRef.current = null;
+        setEditingCell(null);
+        return;
+      }
+      (product as Record<string, unknown>)[field] = parsed;
+    } else {
+      (product as Record<string, unknown>)[field] = editValue;
     }
 
-    (product as Record<string, unknown>)[field] = newValue;
     (product._fieldConfidence as Record<string, string>)[field] = "stated";
 
     updated[rowIndex] = product;
     onProductsChange(updated);
+    editRef.current = null;
+    setEditingCell(null);
+  };
+
+  const cancelEdit = () => {
+    editRef.current = null;
     setEditingCell(null);
   };
 
@@ -55,22 +87,16 @@ export default function ProductGrid({
     field: string
   ) => {
     if (e.key === "Enter") {
-      handleCellSave(rowIndex, field);
+      e.preventDefault();
+      commitCell(rowIndex, field);
     } else if (e.key === "Escape") {
-      setEditingCell(null);
+      e.preventDefault();
+      cancelEdit();
     }
   };
 
   const getIssues = (rowIndex: number, field: string): ValidationIssue[] => {
-    if (!validation) return [];
-    return [
-      ...validation.errors.filter(
-        (e) => e.rowIndex === rowIndex && e.field === field
-      ),
-      ...validation.warnings.filter(
-        (e) => e.rowIndex === rowIndex && e.field === field
-      ),
-    ];
+    return issueMap.get(`${rowIndex}:${field}`) || [];
   };
 
   if (products.length === 0) {
@@ -150,7 +176,7 @@ export default function ProductGrid({
                   issues={getIssues(rowIndex, "name")}
                   onEdit={() => handleCellClick(rowIndex, "name", p.name)}
                   onChange={(v) => setEditValue(v)}
-                  onSave={() => handleCellSave(rowIndex, "name")}
+                  onSave={() => commitCell(rowIndex, "name")}
                   onKeyDown={(e) => handleCellKeyDown(e, rowIndex, "name")}
                 />
               </td>
@@ -188,7 +214,7 @@ export default function ProductGrid({
                     )
                   }
                   onChange={(v) => setEditValue(v)}
-                  onSave={() => handleCellSave(rowIndex, "sellingPrice")}
+                  onSave={() => commitCell(rowIndex, "sellingPrice")}
                   onKeyDown={(e) =>
                     handleCellKeyDown(e, rowIndex, "sellingPrice")
                   }
@@ -213,7 +239,7 @@ export default function ProductGrid({
                     handleCellClick(rowIndex, "costPrice", p.costPrice ?? "")
                   }
                   onChange={(v) => setEditValue(v)}
-                  onSave={() => handleCellSave(rowIndex, "costPrice")}
+                  onSave={() => commitCell(rowIndex, "costPrice")}
                   onKeyDown={(e) =>
                     handleCellKeyDown(e, rowIndex, "costPrice")
                   }
@@ -273,7 +299,7 @@ function EditableCell({
         onBlur={onSave}
         onKeyDown={onKeyDown}
         autoFocus
-        className="bg-slate-800 border border-violet-500/50 rounded-md px-2 py-1 text-sm text-white w-full focus:outline-none focus:border-violet-400"
+        className="bg-slate-800 border border-white/30 rounded-md px-2 py-1 text-sm text-white w-full focus:outline-none focus:border-white/50"
       />
     );
   }
@@ -315,7 +341,7 @@ function OptionsSummary({ options }: { options: ProductOption[] }) {
     <div className="text-xs">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="text-violet-400 hover:text-violet-300 transition-colors"
+        className="text-neutral-400 hover:text-neutral-300 transition-colors"
       >
         {options.length} option{options.length > 1 ? "s" : ""}{" "}
         <i
@@ -347,7 +373,7 @@ function OptionsSummary({ options }: { options: ProductOption[] }) {
                       </span>
                     )}
                     {v.nestedOptions && v.nestedOptions.length > 0 && (
-                      <span className="text-violet-500/70">
+                      <span className="text-neutral-500/70">
                         ({v.nestedOptions.length} add-on
                         {v.nestedOptions.length > 1 ? "s" : ""})
                       </span>

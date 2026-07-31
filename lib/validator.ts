@@ -45,6 +45,17 @@ export function validateProducts(products: Product[]): ValidationResult {
       });
     }
 
+    for (let oi = 0; oi < (p.options ?? []).length; oi++) {
+      const opt = p.options![oi];
+      if (!opt.variants || opt.variants.length === 0) {
+        warnings.push({
+          rowIndex: i,
+          field: `options[${oi}]`,
+          message: `Option "${opt.name}" has no variants — it will be dropped from the export`,
+        });
+      }
+    }
+
     if (!p.category || p.category.trim().length === 0) {
       errors.push({ rowIndex: i, field: "category", message: "Category is required" });
     }

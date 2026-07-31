@@ -1,5 +1,20 @@
 import type { Product, ProductOption, ProductVariant } from "./schema";
 import { CSVMeta } from "./schema";
+import { round2 } from "./normalize";
+
+/**
+ * CSV formula injection guard: cells starting with = + - @ can execute as
+ * formulas when the file is opened in Excel. Prefix with a single quote.
+ */
+function guardFormula(value: string): string {
+  if (/^[=+\-@]/.test(value)) return "'" + value;
+  return value;
+}
+
+function fmtPrice(n: number | undefined | null): string {
+  if (n == null || !isFinite(n)) return "";
+  return round2(n).toFixed(2);
+}
 
 function csvEscape(cell: string): string {
   if (!cell) return "";
@@ -10,15 +25,17 @@ function csvEscape(cell: string): string {
 }
 
 function csvRow(values: (string | number | null | undefined)[]): string {
-  return values.map(v => csvEscape(v != null ? String(v) : "")).join(",");
+  return values
+    .map((v) => csvEscape(guardFormula(v != null ? String(v) : "")))
+    .join(",");
 }
 
-function serializeVariant(v: ProductVariant, _depth: number): string {
+function serializeVariant(v: ProductVariant): string {
   const parts = [
     v.name,
-    v.price,
-    v.costPrice ?? 0,
-    v.minQty ?? 0,
+    fmtPrice(v.price),
+    fmtPrice(v.costPrice ?? 0),
+    v.inventory ?? 0,
     v.description ?? "",
     v.imageUrl ?? "",
   ];
@@ -39,10 +56,12 @@ function serializeNestedOption(o: ProductOption): string {
   const rangeStr = `"[${o.range[0]},${o.range[1]}]"`;
 
   const variantsStr = o.variants
-    .map((v: ProductVariant) => serializeVariant(v, 1))
+    .map((v: ProductVariant) => serializeVariant(v))
     .join(" ; ");
 
-  return `{ ${o.name},${o.type === "single" ? "single" : "multiple"},${o.enableRange ? "yes" : "no"},${rangeStr},${o.required ? "yes" : "no"},${o.view} ( ${variantsStr} ) }`;
+  return `{ ${o.name},${o.type === "single" ? "single" : "multiple"},${
+    o.enableRange ? "yes" : "no"
+  },${rangeStr},${o.required ? "yes" : "no"},${o.view} (${variantsStr} ) }`;
 }
 
 export function generateOptionColumns(
@@ -57,7 +76,6 @@ export function generateOptionColumns(
       maxOpts = activeOpts.length;
     }
   }
-  // Always emit at least OPTION1 columns even if empty (for CSV structure)
   if (maxOpts === 0) maxOpts = 1;
 
   const headers: string[] = [];
@@ -82,12 +100,12 @@ export function generateCSV(products: Product[]): string {
       p.name,
       p.description ?? "",
       p.sku ?? "",
-      p.priceCompare != null ? p.priceCompare : "",
+      fmtPrice(p.priceCompare),
       p.minQty != null && p.maxQty != null
         ? `${p.minQty},${p.maxQty}`
         : "",
-      p.sellingPrice > 0 ? p.sellingPrice : "",
-      p.costPrice != null ? p.costPrice : 0,
+      fmtPrice(p.sellingPrice),
+      fmtPrice(p.costPrice),
       p.taxPercent != null ? p.taxPercent : "",
       p.status.toUpperCase(),
       p.inventory != null ? p.inventory : "",
@@ -100,12 +118,13 @@ export function generateCSV(products: Product[]): string {
     const options = (p.options ?? []).filter(
       (o) => o.variants && o.variants.length > 0
     );
+
     for (let i = 0; i < maxOpts; i++) {
       if (i < options.length) {
         const opt = options[i];
         const rangeStr = `${opt.range[0]},${opt.range[1]}`;
         const variantsStr = opt.variants
-          .map((v: ProductVariant) => serializeVariant(v, 0))
+          .map((v: ProductVariant) => serializeVariant(v))
           .join(" ; ");
 
         baseRow.push(

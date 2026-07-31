@@ -126,7 +126,7 @@ export default function ChatPanel({
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-violet-500/25">
+        <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white">
           <i className="fas fa-wand-magic-sparkles text-sm"></i>
         </div>
         <div className="flex-1">
@@ -170,7 +170,7 @@ export default function ChatPanel({
             <button
               key={i}
               onClick={() => setInput(qp)}
-              className="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400 hover:bg-violet-500/20 hover:text-white hover:border-violet-500/40 transition-colors"
+              className="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white hover:border-white/30 transition-colors"
             >
               {qp.length > 55 ? qp.slice(0, 55) + "..." : qp}
             </button>
@@ -184,12 +184,12 @@ export default function ChatPanel({
             onKeyDown={handleKeyDown}
             placeholder="Describe your products..."
             rows={2}
-            className="flex-1 bg-slate-900/70 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-violet-500/50 focus:shadow-[0_0_15px_rgba(139,92,246,0.15)]"
+            className="flex-1 bg-slate-900/70 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-white/30 focus:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
           />
           <button
             onClick={handleSend}
             disabled={loading || !input.trim()}
-            className="px-4 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 text-white font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-violet-500/25 transition-all"
+            className="px-4 rounded-xl bg-white/10 text-white font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/20 transition-all"
           >
             {loading ? (
               <i className="fas fa-spinner fa-spin"></i>
@@ -211,16 +211,16 @@ function ChatBubble({ message }: { message: ChatMessage }) {
       <div
         className={`max-w-[90%] rounded-2xl px-4 py-3 ${
           isUser
-            ? "bg-violet-500/20 border border-violet-500/30 text-white"
+            ? "bg-white/10 border border-white/20 text-white"
             : "bg-slate-800/60 border border-white/10 text-slate-200"
         }`}
       >
         {!isUser && (
           <div className="flex items-center gap-2 mb-1.5">
-            <div className="w-5 h-5 rounded-md bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+            <div className="w-5 h-5 rounded-md bg-white/10 flex items-center justify-center">
               <i className="fas fa-robot text-[10px] text-white"></i>
             </div>
-            <span className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider">
+            <span className="text-[10px] font-semibold text-white/60 uppercase tracking-wider">
               CSV Agent
             </span>
           </div>
@@ -229,8 +229,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
           {message.content}
         </p>
         {message.clarifyingQuestion && (
-          <div className="mt-2 p-2 bg-violet-500/10 border border-violet-500/20 rounded-lg">
-            <p className="text-xs text-violet-300">
+          <div className="mt-2 p-2 bg-white/5 border border-white/10 rounded-lg">
+            <p className="text-xs text-white/60">
               {message.clarifyingQuestion}
             </p>
           </div>
