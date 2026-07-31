@@ -82,9 +82,17 @@ export interface Product {
   _fieldConfidence?: Record<string, "stated" | "inferred">;
 }
 
+export const ChatMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+});
+
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
 export const BrainRequestSchema = z.object({
   prompt: z.string().min(1, "Prompt is required"),
   currentProducts: z.array(ProductSchema).optional().default([]),
+  history: z.array(ChatMessageSchema).optional().default([]),
 });
 
 export type BrainRequest = z.infer<typeof BrainRequestSchema>;

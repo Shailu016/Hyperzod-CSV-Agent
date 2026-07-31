@@ -13,6 +13,12 @@ export const maxDuration = 60;
 
 const LLM_TIMEOUT_MS = 50000;
 const MAX_PRODUCTS_TO_LLM = 100;
+const MAX_HISTORY_MESSAGES = 8;
+
+interface Turn {
+  role: "user" | "assistant";
+  content: string;
+}
 
 function discoverKey(varName: string): string | null {
   const fromEnv = process.env[varName];
@@ -110,15 +116,20 @@ function parseBrainResponse(text: string): BrainResponse {
   );
 }
 
-async function callGemini(
+async function callGeminiWithModel(
   systemPrompt: string,
-  userMessage: string,
+  turns: Turn[],
   model: string,
   apiKey: string
 ): Promise<{ text: string | null; error: string | null }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const contents = turns.map((t) => ({
+    role: t.role === "user" ? "user" : "model",
+    parts: [{ text: t.content }],
+  }));
   const payload = {
-    contents: [{ parts: [{ text: systemPrompt + "\n\n" + userMessage }] }],
+    contents,
+    systemInstruction: { parts: [{ text: systemPrompt }] },
     generationConfig: { temperature: 0.4, maxOutputTokens: 16384 },
   };
 
@@ -141,7 +152,7 @@ async function callGemini(
 
 async function callDeepSeek(
   systemPrompt: string,
-  userMessage: string,
+  turns: Turn[],
   apiKey: string
 ): Promise<{ text: string | null; error: string | null }> {
   const url = "https://api.deepseek.com/v1/chat/completions";
@@ -149,7 +160,7 @@ async function callDeepSeek(
     model: "deepseek-v4-flash",
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
+      ...turns.map((t) => ({ role: t.role, content: t.content })),
     ],
     temperature: 0.4,
     max_tokens: 16384,
@@ -205,11 +216,20 @@ export async function POST(request: Request) {
       userMsg = `${prompt}\n\nReturn JSON with "products", "assistantMessage", optionally "clarifyingQuestion". If vague, return empty products and a clarifying question.`;
     }
 
-    const fewShotText = FEW_SHOT_EXAMPLES.map((ex) =>
-      ex.role === "user" ? `User: ${ex.content}` : `Assistant: ${ex.content}`
-    ).join("\n\n");
-
-    const fullUserMsg = `${fewShotText}\n\nUser: ${userMsg}\n\nAssistant:`;
+    // Build the conversation: few-shots → history → current message.
+    // Few-shots and history give the model session context ("add a large
+    // size to all of them" now refers to earlier turns).
+    const turns: Turn[] = [
+      ...FEW_SHOT_EXAMPLES.map((ex) => ({
+        role: ex.role,
+        content: ex.content,
+      })),
+      ...(parsed.data.history || []).slice(-MAX_HISTORY_MESSAGES).map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      { role: "user" as const, content: userMsg },
+    ];
 
     // DeepSeek first (verified working), then Gemini as fallback — 1 attempt each
     let text: string | null = null;
@@ -217,7 +237,7 @@ export async function POST(request: Request) {
     if (deepseekKey) {
       const { text: t, error } = await callDeepSeek(
         BRAIN_SYSTEM_PROMPT,
-        fullUserMsg,
+        turns,
         deepseekKey
       );
       if (t) text = t;
@@ -225,9 +245,9 @@ export async function POST(request: Request) {
     }
     if (!text) {
       for (const model of [geminiModel, "gemini-3.5-flash"]) {
-        const { text: t, error } = await callGemini(
+        const { text: t, error } = await callGeminiWithModel(
           BRAIN_SYSTEM_PROMPT,
-          fullUserMsg,
+          turns,
           model,
           geminiKey
         );
