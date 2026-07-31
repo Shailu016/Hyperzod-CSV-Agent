@@ -16,6 +16,7 @@ export default function Home() {
   const [exporting, setExporting] = useState(false);
   const [previewCsv, setPreviewCsv] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const runValidation = useCallback((prods: Product[]) => {
@@ -57,8 +58,11 @@ export default function Home() {
       const parsed = parseCSV(text);
       setProducts(parsed);
       runValidation(parsed);
-    } catch {
+    } catch (err) {
       setCsvFileName(null);
+      setUploadError(
+        `Could not read "${file.name}" — ${err instanceof Error ? err.message : "invalid CSV format"}`
+      );
     }
   };
 
@@ -141,7 +145,20 @@ export default function Home() {
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Top Bar */}
-      <header className="h-14 shrink-0 bg-slate-950/95 border-b border-white/10 flex items-center justify-between px-6 backdrop-blur-sm">
+      <header className="relative h-14 shrink-0 bg-slate-950/95 border-b border-white/10 flex items-center justify-between px-6 backdrop-blur-sm">
+        {uploadError && (
+          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-red-950/90 border border-red-500/40 text-red-300 text-xs px-4 py-2 rounded-lg shadow-xl">
+            <i className="fas fa-circle-exclamation"></i>
+            <span>{uploadError}</span>
+            <button
+              onClick={() => setUploadError(null)}
+              className="ml-2 text-red-400 hover:text-red-200"
+              aria-label="Dismiss"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white">
             <i className="fas fa-wand-magic-sparkles text-xs text-white"></i>

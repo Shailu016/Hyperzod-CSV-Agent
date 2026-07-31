@@ -105,9 +105,13 @@ function inspectUnsplash(u: URL): unknown {
 
 async function inspectGeneric(u: URL): Promise<unknown> {
   try {
+    // GET with a Range header — most CDNs return only the requested bytes.
+    // If Range is ignored, the bounded reader below still caps the download
+    // and aborts the connection after MAX_BYTES.
     const res = await fetch(u, {
-      method: "HEAD",
+      method: "GET",
       redirect: "manual",
+      headers: { Range: `bytes=0-${MAX_BYTES - 1}` },
       signal: AbortSignal.timeout(5000),
     });
     if (res.status >= 300 && res.status < 400) {
@@ -118,20 +122,25 @@ async function inspectGeneric(u: URL): Promise<unknown> {
       return { url: u.toString(), source: "not-image", width: null, height: null, isSquare: null, fixedUrl: u.toString(), needsFix: false, note: `Content-Type: ${contentType}` };
     }
 
-    // Read only the first bytes to extract dimensions
+    // Read only the first bytes to extract dimensions, then abort the stream
     const reader = res.body?.getReader();
     if (!reader) {
       return { url: u.toString(), source: "unknown", width: null, height: null, isSquare: null, fixedUrl: u.toString(), needsFix: false };
     }
     const chunks: Uint8Array[] = [];
     let total = 0;
-    while (total < MAX_BYTES) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      total += value.byteLength;
+    try {
+      while (total < MAX_BYTES) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        total += value.byteLength;
+      }
+    } finally {
+      // Stop downloading the rest of a large image
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
-    reader.releaseLock();
     const buf = Buffer.concat(chunks);
 
     const dims = extractDimensions(buf);

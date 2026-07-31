@@ -201,17 +201,30 @@ function parseVariantString(text: string): ProductVariant | null {
   let working = text.trim();
   const nestedOptions: ProductOption[] = [];
 
-  while (working.includes("{") && working.includes("}")) {
+  // Extract {...} blocks with proper depth tracking — the first "}" is NOT
+  // always the matching close when nested options contain nested options.
+  while (true) {
     const startIdx = working.indexOf("{");
-    const endIdx = working.indexOf("}", startIdx);
-    if (startIdx !== -1 && endIdx !== -1) {
-      const nestedStr = working.slice(startIdx, endIdx + 1);
-      const parsed = parseNestedOption(nestedStr);
-      if (parsed) nestedOptions.push(parsed);
-      working = (working.slice(0, startIdx) + working.slice(endIdx + 1)).trim();
-    } else {
-      break;
+    if (startIdx === -1) break;
+
+    let depth = 0;
+    let endIdx = -1;
+    for (let i = startIdx; i < working.length; i++) {
+      if (working[i] === "{") depth++;
+      else if (working[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          endIdx = i;
+          break;
+        }
+      }
     }
+    if (endIdx === -1) break;
+
+    const nestedStr = working.slice(startIdx, endIdx + 1);
+    const parsed = parseNestedOption(nestedStr);
+    if (parsed) nestedOptions.push(parsed);
+    working = (working.slice(0, startIdx) + working.slice(endIdx + 1)).trim();
   }
 
   const tokens = working.split(",").map((t: string) => t.trim());

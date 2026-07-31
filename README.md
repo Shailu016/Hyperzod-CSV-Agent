@@ -14,7 +14,7 @@ AI-powered CSV product catalog builder for Hyperzod stores. Describe products in
 
 ```bash
 npm install
-# Create .env with GEMINI_API_KEY (from bountystrike/.env)
+cp .env.example .env   # then fill in GEMINI_API_KEY and DEEPSEEK_API_KEY
 npm run dev
 ```
 

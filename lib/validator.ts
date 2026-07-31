@@ -14,6 +14,15 @@ export interface ValidationResult {
   errorCount: number;
 }
 
+function isUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export function validateProducts(products: Product[]): ValidationResult {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
@@ -53,6 +62,38 @@ export function validateProducts(products: Product[]): ValidationResult {
           field: `options[${oi}]`,
           message: `Option "${opt.name}" has no variants — it will be dropped from the export`,
         });
+      }
+
+      // Hyperzod: MULTIPLE options must not contain child options
+      if (opt.type === "multiple") {
+        for (let vi = 0; vi < (opt.variants || []).length; vi++) {
+          const v = opt.variants[vi];
+          if (v.nestedOptions && v.nestedOptions.length > 0) {
+            errors.push({
+              rowIndex: i,
+              field: `options[${oi}].variants[${vi}].nestedOptions`,
+              message: `Hyperzod rejects child options inside MULTIPLE option "${opt.name}"`,
+            });
+          }
+          if (v.imageUrl && !isUrl(v.imageUrl)) {
+            errors.push({
+              rowIndex: i,
+              field: `options[${oi}].variants[${vi}].imageUrl`,
+              message: `Variant image URL is invalid: "${v.imageUrl}"`,
+            });
+          }
+        }
+      } else {
+        for (let vi = 0; vi < (opt.variants || []).length; vi++) {
+          const v = opt.variants[vi];
+          if (v.imageUrl && !isUrl(v.imageUrl)) {
+            errors.push({
+              rowIndex: i,
+              field: `options[${oi}].variants[${vi}].imageUrl`,
+              message: `Variant image URL is invalid: "${v.imageUrl}"`,
+            });
+          }
+        }
       }
     }
 

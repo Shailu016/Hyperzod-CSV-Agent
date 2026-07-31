@@ -4,7 +4,26 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-export function normalizeVariant(v: Record<string, unknown>): ProductVariant {
+function isValidUrl(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const u = new URL(trimmed);
+    if (u.protocol === "http:" || u.protocol === "https:") return trimmed;
+  } catch {
+    /* not a URL */
+  }
+  return "";
+}
+
+export function normalizeVariant(
+  v: Record<string, unknown>,
+  parentType?: "single" | "multiple"
+): ProductVariant {
+  const nestedOptions = Array.isArray(v.nestedOptions)
+    ? v.nestedOptions.map(normalizeOption).filter((o: ProductOption) => o.variants.length > 0)
+    : [];
   return {
     name: typeof v.name === "string" && v.name.trim() ? v.name : "Variant",
     price: typeof v.price === "number" && isFinite(v.price) ? v.price : 0,
@@ -20,30 +39,31 @@ export function normalizeVariant(v: Record<string, unknown>): ProductVariant {
           : 0,
     description:
       typeof v.description === "string" ? v.description : "",
-    imageUrl: typeof v.imageUrl === "string" ? v.imageUrl : "",
-    nestedOptions: Array.isArray(v.nestedOptions)
-      ? v.nestedOptions
-          .map(normalizeOption)
-          .filter((o: ProductOption) => o.variants.length > 0)
-      : [],
+    imageUrl: isValidUrl(v.imageUrl),
+    // Hyperzod: MULTIPLE options must NOT have child options
+    nestedOptions: parentType === "multiple" ? [] : nestedOptions,
   };
 }
 
 export function normalizeOption(o: Record<string, unknown>): ProductOption {
-  const type = o.type === "multiple" ? "multiple" : "single";
+  const rawType = typeof o.type === "string" ? o.type.toLowerCase() : "single";
+  const type = rawType === "multiple" ? "multiple" : "single";
+  const rawView = typeof o.view === "string" ? o.view.toLowerCase() : "list";
   const rawVariants = Array.isArray(o.variants) ? o.variants : [];
+  const toBool = (v: unknown): boolean =>
+    v === true || v === "yes" || v === "YES" || v === "Yes" || v === "true" || v === "1";
   return {
     name: typeof o.name === "string" && o.name.trim() ? o.name : "Option",
     type,
-    enableRange: !!o.enableRange,
+    enableRange: toBool(o.enableRange),
     range:
       Array.isArray(o.range) && o.range.length === 2
         ? [Number(o.range[0]) || 0, Number(o.range[1]) || 0]
         : [0, 0],
-    required: !!o.required,
-    view: o.view === "card" ? "card" : "list",
+    required: toBool(o.required),
+    view: rawView === "card" ? "card" : "list",
     variants: rawVariants
-      .map(normalizeVariant)
+      .map((v: Record<string, unknown>) => normalizeVariant(v, type))
       .filter((v: ProductVariant) => v.name !== "Variant"),
   };
 }
@@ -102,7 +122,7 @@ export function normalizeProduct(p: Record<string, unknown>): Product {
     tags: Array.isArray(p.tags)
       ? p.tags.filter((t: unknown) => typeof t === "string")
       : [],
-    imageUrl: typeof p.imageUrl === "string" ? p.imageUrl : "",
+    imageUrl: isValidUrl(p.imageUrl),
     options: rawOptions
       .map(normalizeOption)
       .filter((o: ProductOption) => o.variants.length > 0),

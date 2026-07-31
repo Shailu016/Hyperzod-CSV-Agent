@@ -1,54 +1,32 @@
 import { NextResponse } from "next/server";
 import {
   BrainRequestSchema,
-  BrainResponseSchema,
   type BrainResponse,
   type Product,
 } from "@/lib/schema";
 import { BRAIN_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from "@/lib/brain-prompt";
 import { normalizeProducts } from "@/lib/normalize";
+import { attachImages, hasImageIntent } from "@/lib/image-match";
+import {
+  isTrivialMessage,
+  trivialReply,
+  classifyIntent,
+  chatReply,
+} from "@/lib/router";
+import { discoverKey } from "@/lib/env";
 
-// Vercel: allow up to 60s for LLM calls (Hobby plan max)
-export const maxDuration = 60;
+// Vercel: Hobby plan allows up to 300s. We use 290s so large catalog
+// generations (50-100 products) finish in a single call instead of
+// timing out at the old 60s ceiling.
+export const maxDuration = 300;
 
-const LLM_TIMEOUT_MS = 50000;
+const LLM_TIMEOUT_MS = 280000;
 const MAX_PRODUCTS_TO_LLM = 100;
 const MAX_HISTORY_MESSAGES = 8;
 
 interface Turn {
   role: "user" | "assistant";
   content: string;
-}
-
-function discoverKey(varName: string): string | null {
-  const fromEnv = process.env[varName];
-  if (fromEnv) return fromEnv;
-  try {
-    const fs = require("fs");
-    const path = require("path");
-    for (const p of [
-      path.resolve("c:\\Hyperzod_repo\\bountystrike\\.env"),
-      path.join(process.cwd(), "..", "bountystrike", ".env"),
-      path.join(process.cwd(), ".env"),
-    ]) {
-      try {
-        const content = fs.readFileSync(p, "utf-8");
-        for (const line of content.split("\n")) {
-          const re = new RegExp(`^${varName}\\s*=\\s*(.+)$`);
-          const match = line.match(re);
-          if (match) {
-            const val = match[1].trim().replace(/^["']|["']$/g, "");
-            if (val) return val;
-          }
-        }
-      } catch {
-        /* skip */
-      }
-    }
-  } catch {
-    /* skip */
-  }
-  return null;
 }
 
 /** Summarize products for the LLM — no image URLs, no raw secrets, cap size. */
@@ -88,33 +66,43 @@ function parseBrainResponse(text: string): BrainResponse {
   try {
     data = JSON.parse(text);
   } catch {
-    const m = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (m) data = JSON.parse(m[1].trim());
-    else {
-      const s = text.indexOf("{");
-      const e = text.lastIndexOf("}") + 1;
-      if (s !== -1 && e > s) data = JSON.parse(text.slice(s, e));
-      else throw new Error("No JSON found");
+    try {
+      const m = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (m) data = JSON.parse(m[1].trim());
+      else {
+        const s = text.indexOf("{");
+        const e = text.lastIndexOf("}") + 1;
+        if (s !== -1 && e > s) data = JSON.parse(text.slice(s, e));
+        else throw new Error("No JSON found");
+      }
+    } catch {
+      // Log the raw model output for debugging before failing
+      console.error("[brain] Unparseable model output:", text.slice(0, 2000));
+      throw new Error(
+        "The model's output was cut off or malformed (likely too many products in one request — try 5-10 per prompt)."
+      );
     }
   }
 
-  // Validate against the strict schema (B6) — garbage fails fast.
-  const parsed = BrainResponseSchema.safeParse(data);
-  if (parsed.success) return parsed.data;
-
-  // Salvage: try products alone; otherwise report the shape error.
-  if (data && typeof data === "object" && Array.isArray((data as { products?: unknown }).products)) {
-    const salvage = BrainResponseSchema.safeParse({
-      products: (data as { products: unknown }).products,
-      assistantMessage: "Done. Review the product list.",
-    });
-    if (salvage.success) return salvage.data;
+  // Lenient structure check — LLMs routinely slip casing ("LIST" vs "list")
+  // or omit optional fields. normalizeProducts() coerces those safely
+  // afterwards. Only fail when the shape is genuinely unusable.
+  const obj = data as { products?: unknown; assistantMessage?: unknown; clarifyingQuestion?: unknown };
+  if (!obj || typeof obj !== "object" || !Array.isArray(obj.products)) {
+    throw new Error("Model output did not contain a products array");
   }
 
-  throw new Error(
-    "Model output did not match the expected schema: " +
-      parsed.error.issues.map((i) => i.path.join(".")).slice(0, 5).join(", ")
-  );
+  return {
+    products: obj.products as BrainResponse["products"],
+    assistantMessage:
+      typeof obj.assistantMessage === "string"
+        ? obj.assistantMessage
+        : "Done. Review the product list.",
+    clarifyingQuestion:
+      typeof obj.clarifyingQuestion === "string"
+        ? obj.clarifyingQuestion
+        : undefined,
+  } as BrainResponse;
 }
 
 async function callGeminiWithModel(
@@ -131,7 +119,7 @@ async function callGeminiWithModel(
   const payload = {
     contents,
     systemInstruction: { parts: [{ text: systemPrompt }] },
-    generationConfig: { temperature: 0.4, maxOutputTokens: 16384 },
+    generationConfig: { temperature: 0.4, maxOutputTokens: 65536 },
   };
 
   try {
@@ -143,7 +131,12 @@ async function callGeminiWithModel(
     });
     if (res.ok) {
       const d = await res.json();
-      return { text: d.candidates?.[0]?.content?.parts?.[0]?.text || null, error: null };
+      const finishReason = d.candidates?.[0]?.finishReason;
+      const text = d.candidates?.[0]?.content?.parts?.[0]?.text || null;
+      if (text && finishReason === "MAX_TOKENS") {
+        return { text, error: `${model}: output truncated (MAX_TOKENS)` };
+      }
+      return { text, error: null };
     }
     return { text: null, error: `${model}: ${res.status}` };
   } catch {
@@ -164,7 +157,7 @@ async function callDeepSeek(
       ...turns.map((t) => ({ role: t.role, content: t.content })),
     ],
     temperature: 0.4,
-    max_tokens: 16384,
+    max_tokens: 65536,
   };
 
   try {
@@ -176,7 +169,12 @@ async function callDeepSeek(
     });
     if (res.ok) {
       const d = await res.json();
-      return { text: d.choices?.[0]?.message?.content || null, error: null };
+      const finishReason = d.choices?.[0]?.finish_reason;
+      const text = d.choices?.[0]?.message?.content || null;
+      if (text && finishReason === "length") {
+        return { text, error: "DeepSeek: output truncated (length)" };
+      }
+      return { text, error: null };
     }
     return { text: null, error: `DeepSeek: ${res.status}` };
   } catch {
@@ -208,7 +206,27 @@ export async function POST(request: Request) {
 
     const geminiModel = process.env.GEMINI_MODEL || "gemini-3.6-flash";
     const deepseekKey = discoverKey("DEEPSEEK_API_KEY");
+    const history = parsed.data.history || [];
 
+    // ── TIER 1: Trivial filler ("ok", "thanks") → instant, zero LLM ──
+    if (isTrivialMessage(prompt)) {
+      return NextResponse.json(trivialReply(prompt));
+    }
+
+    // ── TIER 2: Classify intent with a cheap model ──
+    const intent = await classifyIntent(prompt, hasProducts, geminiKey);
+
+    // ── TIER 3: Chat → lightweight agent (has history, fast) ──
+    if (intent === "chat") {
+      const reply = await chatReply(prompt, history, geminiKey, deepseekKey);
+      // CRITICAL: echo the current products back unchanged — the client
+      // replaces its grid with whatever this returns. An empty array would
+      // wipe loaded products on small talk.
+      reply.products = currentProducts as BrainResponse["products"];
+      return NextResponse.json(reply);
+    }
+
+    // ── TIER 4: csv_create / csv_edit → the full brain ──
     let userMsg: string;
     if (hasProducts) {
       const stripped = stripForLLM(currentProducts);
@@ -225,15 +243,18 @@ export async function POST(request: Request) {
         role: ex.role,
         content: ex.content,
       })),
-      ...(parsed.data.history || []).slice(-MAX_HISTORY_MESSAGES).map((m) => ({
+      ...(history).slice(-MAX_HISTORY_MESSAGES).map((m) => ({
         role: m.role,
         content: m.content,
       })),
       { role: "user" as const, content: userMsg },
     ];
 
-    // DeepSeek first (verified working), then Gemini as fallback — 1 attempt each
+    // DeepSeek first (verified working), then Gemini as fallback — 1 attempt each.
+    // Truncated text (MAX_TOKENS/length) is kept as a last resort: a partial
+    // catalog beats an error. We only discard text on hard failures.
     let text: string | null = null;
+    let truncated = false;
     let errors: string[] = [];
     if (deepseekKey) {
       const { text: t, error } = await callDeepSeek(
@@ -241,8 +262,11 @@ export async function POST(request: Request) {
         turns,
         deepseekKey
       );
-      if (t) text = t;
-      else if (error) errors.push(error);
+      if (t && !error) text = t;
+      else if (t && error) {
+        text = t;
+        truncated = true;
+      } else if (error) errors.push(error);
     }
     if (!text) {
       for (const model of [geminiModel, "gemini-3.5-flash"]) {
@@ -252,8 +276,14 @@ export async function POST(request: Request) {
           model,
           geminiKey
         );
-        if (t) {
+        if (t && !error) {
           text = t;
+          truncated = false;
+          break;
+        }
+        if (t && error) {
+          text = t;
+          truncated = true;
           break;
         }
         if (error) errors.push(error);
@@ -283,9 +313,32 @@ export async function POST(request: Request) {
       );
     }
 
+    if (truncated) {
+      responseData.assistantMessage =
+        (responseData.assistantMessage || "") +
+        " (Note: the response was cut off at the model's output limit — some products may be missing. Try fewer products per prompt.)";
+    }
+
     responseData.products = normalizeProducts(
       responseData.products as unknown as Record<string, unknown>[]
     ) as BrainResponse["products"];
+
+    // If the user asked for images, run the two-prompt match pipeline:
+    // build search query → grade top-5 → fallback → blank. Never settle
+    // for a loosely-related photo.
+    let imageNote = "";
+    if (hasImageIntent(prompt)) {
+      try {
+        const { products: withImages, report } = await attachImages(
+          responseData.products as unknown as Product[]
+        );
+        responseData.products = withImages as unknown as BrainResponse["products"];
+        imageNote = ` Images: matched ${report.matched}, blank ${report.blank}, inherited ${report.inherited}, skipped ${report.skipped}.`;
+      } catch {
+        imageNote = " Image matching failed — images left blank.";
+      }
+      responseData.assistantMessage = (responseData.assistantMessage || "") + imageNote;
+    }
 
     return NextResponse.json(responseData);
   } catch (error: unknown) {

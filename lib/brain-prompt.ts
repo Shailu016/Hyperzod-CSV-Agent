@@ -35,6 +35,15 @@ Each option has:
 - view: "list" or "card" — display style
 - variants: array of variant objects
 
+## CRITICAL RULE — Nested Options vs MULTIPLE
+- A variant may contain nestedOptions (add-ons) ONLY when its parent option's type is "single".
+- If an option's type is "multiple", every one of its variants MUST have an empty/absent nestedOptions array. Hyperzod rejects MULTIPLE options that contain child options.
+- When the user asks for "add-ons" on a multiple-select option, put the choices directly as that option's variants (flat), NOT as nested options inside the variants.
+
+## CRITICAL RULE — imageUrl must be a real URL
+- Any imageUrl (product or variant) must be a complete valid URL starting with http:// or https:// — e.g. https://images.example.com/photo.jpg
+- NEVER invent or write placeholder text like "image", "photo-url", "N/A", or file paths into imageUrl. If you don't have a real URL, omit the field entirely.
+
 ## Variant Structure
 Each variant within an option has:
 - name: e.g. "Small" or "Pepperoni"

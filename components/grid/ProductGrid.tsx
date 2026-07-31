@@ -149,7 +149,7 @@ export default function ProductGrid({
         <tbody>
           {products.map((p, rowIndex) => (
             <tr
-              key={rowIndex}
+              key={p.id || p.sku || `row-${rowIndex}`}
               className="border-b border-white/5 hover:bg-white/[0.02] transition-colors"
             >
               <td className="p-3 text-slate-500 font-mono text-xs">
