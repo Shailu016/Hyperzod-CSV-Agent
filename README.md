@@ -1,36 +1,28 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Hyperzod CSV Agent
 
-## Getting Started
+AI-powered CSV product catalog builder for Hyperzod stores. Describe products in plain English, preview the data, and export a Hyperzod-compliant import file.
 
-First, run the development server:
+## Features
+
+- **Chat-to-CSV**: Describe products naturally — "5 t-shirts, 3 sizes, ₹499 each, 4 colors"
+- **CSV Upload & Edit**: Drag-drop an existing Hyperzod CSV and prompt-edit it ("increase all prices 10%")
+- **Live Preview Grid**: Edit any cell by hand, see validation errors inline, confidence flags for AI-inferred values
+- **Multi-level Options**: Supports Hyperzod nested add-ons (variants → sub-options) with correct `{}/();,` DSL syntax
+- **Dual AI**: Uses Gemini 3.6 Flash with automatic fallback to DeepSeek V4
+
+## Quick Start
 
 ```bash
+npm install
+# Create .env with GEMINI_API_KEY (from bountystrike/.env)
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tech
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Next.js 14 (App Router) + TypeScript
+- Tailwind CSS
+- Zod validation
+- Gemini 3.6 Flash / DeepSeek V4 (auto-fallback)
