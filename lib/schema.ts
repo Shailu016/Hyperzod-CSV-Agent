@@ -43,6 +43,7 @@ export const ProductOptionSchema: z.ZodType<any> = z.object({
 });
 
 export const ProductSchema = z.object({
+  id: z.string().optional(),
   name: z.string().min(1, "Product name is required"),
   description: z.string().optional().default(""),
   sku: z.string().optional().default(""),
@@ -63,6 +64,7 @@ export const ProductSchema = z.object({
 });
 
 export interface Product {
+  id?: string;
   name: string;
   description?: string;
   sku?: string;

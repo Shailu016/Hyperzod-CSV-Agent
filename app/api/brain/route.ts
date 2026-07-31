@@ -60,6 +60,7 @@ function stripForLLM(products: Product[]): Record<string, unknown>[] {
       category: p.category,
       status: p.status,
     };
+    if (p.id) c.id = p.id;
     if (p.sku) c.sku = p.sku;
     if (p.costPrice != null) c.costPrice = p.costPrice;
     if (p.inventory != null) c.inventory = p.inventory;

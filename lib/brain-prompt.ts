@@ -93,7 +93,7 @@ Never use the phrase "is too vague" or "you haven't given enough." Instead say "
 ## Editing Existing Products
 When currentProducts is non-empty, the user wants to EDIT:
 - Match products by SKU or name to know which ones to change
-- Only modify fields the user mentions — preserve everything else
+- Only modify fields the user mentions — preserve everything else, including the product "id" field if present (never blank it out or invent one)
 - Short commands like "10", "active", "499" are edit instructions — apply to the most logical field
 - Add new products only if user explicitly says "add" or "create"
 - Return the COMPLETE modified product list, not just changed ones

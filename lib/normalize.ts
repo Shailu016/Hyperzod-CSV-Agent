@@ -61,6 +61,7 @@ export function normalizeProduct(p: Record<string, unknown>): Product {
   const rawOptions = Array.isArray(p.options) ? p.options : [];
 
   return {
+    id: typeof p.id === "string" && p.id.trim() ? p.id : undefined,
     name:
       typeof p.name === "string" && p.name.trim()
         ? p.name

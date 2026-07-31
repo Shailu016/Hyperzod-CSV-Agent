@@ -287,6 +287,7 @@ export function parseCSV(csvText: string): Product[] {
 
     const costCell = parseFloat(row["PRODUCT.PRICE.COST"] || "0");
     const product: Product = {
+      id: row["PRODUCT.ID"] || undefined,
       name,
       description: row["PRODUCT.DESCRIPTION"] || "",
       sku: row["PRODUCT.SKU"] || "",
