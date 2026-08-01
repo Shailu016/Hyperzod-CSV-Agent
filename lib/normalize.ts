@@ -4,6 +4,9 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** Max nesting depth for options inside variants (Hyperzod confirmed: 2, allowed: 3). */
+export const MAX_NESTED_DEPTH = 3;
+
 function isValidUrl(value: unknown): string {
   if (typeof value !== "string") return "";
   const trimmed = value.trim();
@@ -19,10 +22,13 @@ function isValidUrl(value: unknown): string {
 
 export function normalizeVariant(
   v: Record<string, unknown>,
-  parentType?: "single" | "multiple"
+  parentType?: "single" | "multiple",
+  depth = 1
 ): ProductVariant {
   const nestedOptions = Array.isArray(v.nestedOptions)
-    ? v.nestedOptions.map(normalizeOption).filter((o: ProductOption) => o.variants.length > 0)
+    ? v.nestedOptions
+        .map((o: Record<string, unknown>) => normalizeOption(o, depth + 1))
+        .filter((o: ProductOption) => o.variants.length > 0)
     : [];
   return {
     name: typeof v.name === "string" && v.name.trim() ? v.name : "Variant",
@@ -41,11 +47,15 @@ export function normalizeVariant(
       typeof v.description === "string" ? v.description : "",
     imageUrl: isValidUrl(v.imageUrl),
     // Hyperzod: MULTIPLE options must NOT have child options
-    nestedOptions: parentType === "multiple" ? [] : nestedOptions,
+    nestedOptions:
+      parentType === "multiple" || depth >= MAX_NESTED_DEPTH ? [] : nestedOptions,
   };
 }
 
-export function normalizeOption(o: Record<string, unknown>): ProductOption {
+export function normalizeOption(
+  o: Record<string, unknown>,
+  depth = 1
+): ProductOption {
   const rawType = typeof o.type === "string" ? o.type.toLowerCase() : "single";
   const type = rawType === "multiple" ? "multiple" : "single";
   const rawView = typeof o.view === "string" ? o.view.toLowerCase() : "list";
@@ -63,7 +73,7 @@ export function normalizeOption(o: Record<string, unknown>): ProductOption {
     required: toBool(o.required),
     view: rawView === "card" ? "card" : "list",
     variants: rawVariants
-      .map((v: Record<string, unknown>) => normalizeVariant(v, type))
+      .map((v: Record<string, unknown>) => normalizeVariant(v, type, depth))
       .filter((v: ProductVariant) => v.name !== "Variant"),
   };
 }

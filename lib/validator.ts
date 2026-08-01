@@ -93,6 +93,21 @@ export function validateProducts(products: Product[]): ValidationResult {
               message: `Variant image URL is invalid: "${v.imageUrl}"`,
             });
           }
+          // 3-level nesting allowed but unverified against real Hyperzod
+          for (let ni = 0; ni < (v.nestedOptions || []).length; ni++) {
+            const no = v.nestedOptions![ni];
+            for (let nvi = 0; nvi < (no.variants || []).length; nvi++) {
+              const nv = no.variants[nvi];
+              if (nv.nestedOptions && nv.nestedOptions.length > 0) {
+                warnings.push({
+                  rowIndex: i,
+                  field: `options[${oi}].variants[${vi}].nestedOptions[${ni}].variants[${nvi}].nestedOptions`,
+                  message:
+                    "3-level nesting detected — Hyperzod only confirms 2 levels; verify against a real import",
+                });
+              }
+            }
+          }
         }
       }
     }

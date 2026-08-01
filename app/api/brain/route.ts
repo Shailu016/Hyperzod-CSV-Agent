@@ -12,8 +12,11 @@ import {
   trivialReply,
   classifyIntent,
   chatReply,
+  type Intent,
 } from "@/lib/router";
 import { discoverKey } from "@/lib/env";
+import { authorizeEdit, extractNumericOps, applyNumericOp, resolveFieldTargetLLM } from "@/lib/edit-intent";
+import { deepDiffProducts, restoreEntries } from "@/lib/deep-diff";
 
 // Vercel: Hobby plan allows up to 300s. We use 290s so large catalog
 // generations (50-100 products) finish in a single call instead of
@@ -213,8 +216,21 @@ export async function POST(request: Request) {
       return NextResponse.json(trivialReply(prompt));
     }
 
-    // ── TIER 2: Classify intent with a cheap model ──
-    const intent = await classifyIntent(prompt, hasProducts, geminiKey);
+    // ── TIER 2: Classify intent — conversation-aware ──
+    // If the assistant's last message was a question (e.g. a clarifying
+    // question about products), the user's reply is an ANSWER to it and
+    // must reach the brain — never the chat agent. This fixes "pic random
+    // cuisine" being misrouted as small talk when the classifier is down.
+    const lastAssistant = [...history].reverse().find((m) => m.role === "assistant");
+    const answeringClarification =
+      !!lastAssistant && lastAssistant.content.trim().endsWith("?");
+
+    let intent: Intent;
+    if (answeringClarification) {
+      intent = hasProducts ? "csv_edit" : "csv_create";
+    } else {
+      intent = await classifyIntent(prompt, hasProducts, geminiKey);
+    }
 
     // ── TIER 3: Chat → lightweight agent (has history, fast) ──
     if (intent === "chat") {
@@ -224,6 +240,36 @@ export async function POST(request: Request) {
       // wipe loaded products on small talk.
       reply.products = currentProducts as BrainResponse["products"];
       return NextResponse.json(reply);
+    }
+
+    // ── IMAGE-ONLY SHORTCUT ──
+    // If products are already loaded and the user only asked for images,
+    // skip the LLM entirely — running it would reconstruct the product
+    // list from a summary and can silently DROP nestedOptions. Attach
+    // images directly to the existing (intact) data instead.
+    if (hasProducts && hasImageIntent(prompt)) {
+      try {
+        const { products: withImages, report } = await attachImages(
+          currentProducts as Product[]
+        );
+        return NextResponse.json({
+          products: withImages as BrainResponse["products"],
+          assistantMessage:
+            `Attached images: ${report.matched} matched, ${report.blank} blank, ${report.inherited} inherited, ${report.skipped} skipped. ` +
+            `All existing options and nested add-ons preserved.`,
+        });
+      } catch (err: unknown) {
+        return NextResponse.json(
+          {
+            error: "Image matching failed",
+            message:
+              err instanceof Error
+                ? err.message
+                : "Could not attach images. Products left unchanged.",
+          },
+          { status: 500 }
+        );
+      }
     }
 
     // ── TIER 4: csv_create / csv_edit → the full brain ──
@@ -323,6 +369,56 @@ export async function POST(request: Request) {
       responseData.products as unknown as Record<string, unknown>[]
     ) as BrainResponse["products"];
 
+    // ── EDIT SAFETY: authorize → diff → restore unauthorized changes ──
+    // Only fields the user mentioned may change. Anything the model
+    // altered outside the authorized set is reverted to its original
+    // value. Numeric ops (set/scale) are computed in code, never by the model.
+    let editNote = "";
+    if (intent === "csv_edit" && hasProducts) {
+      let auth = authorizeEdit(prompt);
+
+      // LLM fallback for typos / other languages — try once before clarifying
+      if (!auth.hasFieldTarget) {
+        const resolved = await resolveFieldTargetLLM(prompt, deepseekKey || geminiKey);
+        if (resolved) {
+          if (resolved === "options") {
+            auth = { hasFieldTarget: true, fields: new Set(), touchesOptions: true, summary: "options" };
+          } else {
+            auth = { hasFieldTarget: true, fields: new Set([resolved]), touchesOptions: false, summary: resolved };
+          }
+        }
+      }
+
+      if (!auth.hasFieldTarget) {
+        return NextResponse.json({
+          products: currentProducts as BrainResponse["products"],
+          assistantMessage: auth.reason,
+          clarifyingQuestion: auth.reason,
+        });
+      }
+
+      // Apply deterministic numeric ops first (authorized by keyword)
+      let patched = responseData.products as unknown as Product[];
+      const numericOps = extractNumericOps(prompt);
+      if (numericOps.length > 0) {
+        for (const op of numericOps) auth.fields.add(op.targetField);
+        patched = patched.map((p) => numericOps.reduce((acc, op) => applyNumericOp(acc, op), p));
+        responseData.products = patched as unknown as BrainResponse["products"];
+      }
+
+      // Diff original vs result; revert anything not authorized
+      const diffs = deepDiffProducts(currentProducts, responseData.products as unknown as Product[]);
+      const unauthorized = diffs.filter((d) => !auth.fields.has(d.rootField) && !auth.touchesOptions);
+      if (unauthorized.length > 0) {
+        responseData.products = restoreEntries(
+          responseData.products as unknown as Product[],
+          unauthorized
+        ) as unknown as BrainResponse["products"];
+        const paths = [...new Set(unauthorized.map((d) => d.path))].slice(0, 5).join(", ");
+        editNote = ` Preserved ${unauthorized.length} unmentioned field(s) the model tried to change (${paths}...).`;
+      }
+    }
+
     // If the user asked for images, run the two-prompt match pipeline:
     // build search query → grade top-5 → fallback → blank. Never settle
     // for a loosely-related photo.
@@ -337,8 +433,9 @@ export async function POST(request: Request) {
       } catch {
         imageNote = " Image matching failed — images left blank.";
       }
-      responseData.assistantMessage = (responseData.assistantMessage || "") + imageNote;
     }
+
+    responseData.assistantMessage = (responseData.assistantMessage || "") + imageNote + editNote;
 
     return NextResponse.json(responseData);
   } catch (error: unknown) {

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { BrainResponse, Product } from "@/lib/schema";
+import AgentActivity from "@/components/AgentActivity";
 
 interface ChatPanelProps {
   products: Product[];
@@ -164,6 +165,7 @@ export default function ChatPanel({
         {messages.map((msg, i) => (
           <ChatBubble key={i} message={msg} />
         ))}
+        {loading && <AgentActivity active={loading} />}
         <div ref={messagesEndRef} />
       </div>
 
