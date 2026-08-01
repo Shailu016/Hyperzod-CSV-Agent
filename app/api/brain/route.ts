@@ -435,7 +435,48 @@ export async function POST(request: Request) {
       }
     }
 
-    responseData.assistantMessage = (responseData.assistantMessage || "") + imageNote + editNote;
+    // ── Completion summary ──
+    // Tell the user what was actually done, plus the import-error invite.
+    const doneProducts = responseData.products as unknown as Product[];
+    const optCount = doneProducts.reduce(
+      (sum, p) => sum + (p.options || []).length,
+      0
+    );
+    const variantCount = doneProducts.reduce(
+      (sum, p) =>
+        sum +
+        (p.options || []).reduce(
+          (s, o) => s + (o.variants || []).length,
+          0
+        ),
+      0
+    );
+    const nestedCount = doneProducts.reduce(
+      (sum, p) =>
+        sum +
+        (p.options || []).reduce(
+          (s, o) =>
+            s +
+            (o.variants || []).reduce(
+              (s2, v) => s2 + (v.nestedOptions || []).length,
+              0
+            ),
+          0
+        ),
+      0
+    );
+
+    const summary = `\n\n✅ Done — ${doneProducts.length} product${
+      doneProducts.length !== 1 ? "s" : ""
+    }${intent === "csv_edit" ? " updated" : " created"}${
+      optCount > 0 ? ` with ${optCount} option group${optCount !== 1 ? "s" : ""}` : ""
+    }${variantCount > 0 ? ` and ${variantCount} variant${variantCount !== 1 ? "s" : ""}` : ""}${
+      nestedCount > 0 ? ` (${nestedCount} nested add-on${nestedCount !== 1 ? "s" : ""})` : ""
+    }. Review the grid, then click Export CSV.
+\nIf you get any error while importing this CSV, paste it here and I'll fix it.`;
+
+    responseData.assistantMessage =
+      (responseData.assistantMessage || "").replace(/\s+$/, "") + imageNote + editNote + summary;
 
     return NextResponse.json(responseData);
   } catch (error: unknown) {
