@@ -243,11 +243,20 @@ export async function POST(request: Request) {
     }
 
     // ── IMAGE-ONLY SHORTCUT ──
-    // If products are already loaded and the user only asked for images,
-    // skip the LLM entirely — running it would reconstruct the product
-    // list from a summary and can silently DROP nestedOptions. Attach
-    // images directly to the existing (intact) data instead.
-    if (hasProducts && hasImageIntent(prompt)) {
+    // If products are already loaded and the user ONLY asked for images
+    // (no other field/edit intent), skip the LLM entirely — running it
+    // would reconstruct the product list from a summary and can silently
+    // DROP nestedOptions. Attach images directly to intact data instead.
+    // Guard: only when the prompt is purely about images — an edit like
+    // "Pick Your Bottle" must never hit this path (word-boundary fix).
+    const imgAuth = authorizeEdit(prompt);
+    const isImageOnly =
+      hasImageIntent(prompt) &&
+      imgAuth.fields.size === 1 &&
+      imgAuth.fields.has("imageUrl") &&
+      !imgAuth.touchesOptions;
+
+    if (hasProducts && isImageOnly) {
       try {
         const { products: withImages, report } = await attachImages(
           currentProducts as Product[]

@@ -370,7 +370,7 @@ export async function attachImages(products: Product[]): Promise<AttachResult> {
 }
 
 export function hasImageIntent(prompt: string): boolean {
-  return /(add|set|put|give|attach|generate).{0,20}(image|photo|picture|pic)s?|images?\s+(to|for|of)/i.test(prompt) ||
-    /(image|photo|picture|pic)s?\b.*\b(add|attach|fill|get|find)/i.test(prompt) ||
-    /\bimages\b/i.test(prompt);
+  return /(add|set|put|give|attach|generate).{0,20}\b(image|photo|picture|pic)s?\b|images?\s+(to|for|of)/i.test(prompt) ||
+    /\b(image|photo|picture|pic)s?\b.*\b(add|attach|fill|get|find)\b/i.test(prompt) ||
+    /\bimages?\b/i.test(prompt);
 }
