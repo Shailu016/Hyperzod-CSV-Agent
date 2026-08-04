@@ -7,6 +7,7 @@ import {
 import { BRAIN_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from "@/lib/brain-prompt";
 import { normalizeProducts } from "@/lib/normalize";
 import { attachImages, hasImageIntent } from "@/lib/image-match";
+import { mergeProducts } from "@/lib/patch-merge";
 import {
   isTrivialMessage,
   trivialReply,
@@ -17,6 +18,9 @@ import {
 import { discoverKey } from "@/lib/env";
 import { authorizeEdit, extractNumericOps, applyNumericOp, resolveFieldTargetLLM } from "@/lib/edit-intent";
 import { deepDiffProducts, restoreEntries } from "@/lib/deep-diff";
+import { deriveSessionState, sessionBlock, type SessionState } from "@/lib/session";
+import { judgeComplexity, type ComplexityVerdict } from "@/lib/complexity";
+import { stripForLLM } from "@/lib/strip";
 
 // Vercel: Hobby plan allows up to 300s. We use 290s so large catalog
 // generations (50-100 products) finish in a single call instead of
@@ -24,7 +28,6 @@ import { deepDiffProducts, restoreEntries } from "@/lib/deep-diff";
 export const maxDuration = 300;
 
 const LLM_TIMEOUT_MS = 280000;
-const MAX_PRODUCTS_TO_LLM = 100;
 const MAX_HISTORY_MESSAGES = 8;
 
 interface Turn {
@@ -32,39 +35,7 @@ interface Turn {
   content: string;
 }
 
-/** Summarize products for the LLM — no image URLs, no raw secrets, cap size. */
-function stripForLLM(products: Product[]): Record<string, unknown>[] {
-  return products.slice(0, MAX_PRODUCTS_TO_LLM).map((p) => {
-    const c: Record<string, unknown> = {
-      name: p.name,
-      sellingPrice: p.sellingPrice,
-      category: p.category,
-      status: p.status,
-    };
-    if (p.id) c.id = p.id;
-    if (p.sku) c.sku = p.sku;
-    if (p.costPrice != null) c.costPrice = p.costPrice;
-    if (p.inventory != null) c.inventory = p.inventory;
-    if (p.imageUrl) c.imageUrl = p.imageUrl;
-    if (p.options?.length) {
-      c.options = p.options.map((o) => ({
-        name: o.name,
-        type: o.type,
-        variantCount: o.variants.length,
-        variantNames: o.variants.map((v: { name: string }) => v.name),
-        nestedOptions: (o.variants[0]?.nestedOptions ?? []).map(
-          (n: { name: string; variants: { name: string }[] }) => ({
-            name: n.name,
-            variantNames: n.variants.map((v) => v.name),
-          })
-        ),
-      }));
-    }
-    return c;
-  });
-}
-
-function parseBrainResponse(text: string): BrainResponse {
+function parseBrainResponse(text: string, allowRawArray = false): BrainResponse {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -73,10 +44,17 @@ function parseBrainResponse(text: string): BrainResponse {
       const m = text.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (m) data = JSON.parse(m[1].trim());
       else {
-        const s = text.indexOf("{");
-        const e = text.lastIndexOf("}") + 1;
-        if (s !== -1 && e > s) data = JSON.parse(text.slice(s, e));
-        else throw new Error("No JSON found");
+        // Try array-first: patch edits return a raw product array
+        const s = text.indexOf("[");
+        const e = text.lastIndexOf("]") + 1;
+        if (allowRawArray && s !== -1 && e > s) {
+          data = JSON.parse(text.slice(s, e));
+        } else {
+          const s2 = text.indexOf("{");
+          const e2 = text.lastIndexOf("}") + 1;
+          if (s2 !== -1 && e2 > s2) data = JSON.parse(text.slice(s2, e2));
+          else throw new Error("No JSON found");
+        }
       }
     } catch {
       // Log the raw model output for debugging before failing
@@ -85,6 +63,14 @@ function parseBrainResponse(text: string): BrainResponse {
         "The model's output was cut off or malformed (likely too many products in one request — try 5-10 per prompt)."
       );
     }
+  }
+
+  // Raw array format (patch edit) — the whole response is the changed products
+  if (allowRawArray && Array.isArray(data)) {
+    return {
+      products: data as BrainResponse["products"],
+      assistantMessage: "Done. Review the product list.",
+    } as BrainResponse;
   }
 
   // Lenient structure check — LLMs routinely slip casing ("LIST" vs "list")
@@ -150,18 +136,29 @@ async function callGeminiWithModel(
 async function callDeepSeek(
   systemPrompt: string,
   turns: Turn[],
-  apiKey: string
+  apiKey: string,
+  opts: { thinking?: boolean } = {}
 ): Promise<{ text: string | null; error: string | null }> {
   const url = "https://api.deepseek.com/v1/chat/completions";
-  const payload = {
+  // Thinking mode: enabled with high effort for complex tasks, EXPLICITLY
+  // disabled for simple ones (the API defaults it ON, which would burn
+  // tokens and latency on trivial edits).
+  const thinking = opts.thinking ?? false;
+  const payload: Record<string, unknown> = {
     model: "deepseek-v4-flash",
     messages: [
       { role: "system", content: systemPrompt },
       ...turns.map((t) => ({ role: t.role, content: t.content })),
     ],
-    temperature: 0.4,
     max_tokens: 65536,
   };
+  if (thinking) {
+    payload.thinking = { type: "enabled" };
+    payload.reasoning_effort = "high";
+  } else {
+    payload.thinking = { type: "disabled" };
+    payload.temperature = 0.4;
+  }
 
   try {
     const res = await fetch(url, {
@@ -282,23 +279,72 @@ export async function POST(request: Request) {
     }
 
     // ── TIER 4: csv_create / csv_edit → the full brain ──
+    // Intelligence layer: derive the session (goal, last action, turn
+    // continuity) and judge task complexity. Simple tasks run thinking
+    // OFF with a compact product view (fast, cheap); complex tasks run
+    // thinking ON with the full catalog view (slow, careful).
+    const session: SessionState = deriveSessionState(
+      history,
+      prompt,
+      currentProducts as Product[]
+    );
+    const verdict: ComplexityVerdict = judgeComplexity(
+      prompt,
+      session,
+      currentProducts as Product[],
+      intent === "csv_create" ? "csv_create" : "csv_edit"
+    );
+    console.log(
+      "[brain] complexity:",
+      verdict.tier,
+      `(score ${verdict.score}: ${verdict.reasons.join("; ") || "no signals"})`,
+      "thinking:",
+      verdict.thinking ? "on" : "off",
+      "context:",
+      verdict.context
+    );
+
     let userMsg: string;
     if (hasProducts) {
-      const stripped = stripForLLM(currentProducts);
-      userMsg = `Edit these ${stripped.length} products: ${prompt}\n\nProducts:\n${JSON.stringify(stripped)}`;
+      const stripped = stripForLLM(currentProducts, verdict.context);
+      const directive =
+        verdict.tier === "complex"
+          ? "This is a COMPLEX task — reason carefully about scope, conditions, and exclusions before editing."
+          : "This is a SIMPLE targeted change — change exactly what was asked and nothing else.";
+      // PATCH-STYLE EDIT: the model returns ONLY the products it changed,
+      // not the entire catalog. Echoing everything blows the output token
+      // cap on large CSVs (the "cut off or malformed" error). Code merges
+      // the returned products back onto the originals.
+      userMsg = `${sessionBlock(session)}
+
+${directive}
+
+You are editing a catalog of ${stripped.length} products.
+
+${prompt}
+
+Return ONLY the products that were CHANGED by this instruction (full product objects, with all their options/variants intact). Do NOT return unchanged products. If a change applies to all products, return all of them.
+Do NOT include a "products" key — return a raw JSON array of the changed products.
+
+Current catalog (for reference):
+${JSON.stringify(stripped)}`;
     } else {
-      userMsg = `${prompt}\n\nReturn JSON with "products", "assistantMessage", optionally "clarifyingQuestion". If vague, return empty products and a clarifying question.`;
+      userMsg = `${sessionBlock(session)}
+
+${prompt}\n\nReturn JSON with "products", "assistantMessage", optionally "clarifyingQuestion". If vague, return empty products and a clarifying question.`;
     }
 
     // Build the conversation: few-shots → history → current message.
     // Few-shots and history give the model session context ("add a large
-    // size to all of them" now refers to earlier turns).
+    // size to all of them" now refers to earlier turns). Complex tasks
+    // get a longer history window — they need the full thread.
+    const historyWindow = verdict.tier === "complex" ? 12 : MAX_HISTORY_MESSAGES;
     const turns: Turn[] = [
       ...FEW_SHOT_EXAMPLES.map((ex) => ({
         role: ex.role,
         content: ex.content,
       })),
-      ...(history).slice(-MAX_HISTORY_MESSAGES).map((m) => ({
+      ...(history).slice(-historyWindow).map((m) => ({
         role: m.role,
         content: m.content,
       })),
@@ -315,7 +361,8 @@ export async function POST(request: Request) {
       const { text: t, error } = await callDeepSeek(
         BRAIN_SYSTEM_PROMPT,
         turns,
-        deepseekKey
+        deepseekKey,
+        { thinking: verdict.thinking }
       );
       if (t && !error) text = t;
       else if (t && error) {
@@ -357,7 +404,7 @@ export async function POST(request: Request) {
 
     let responseData: BrainResponse;
     try {
-      responseData = parseBrainResponse(text);
+      responseData = parseBrainResponse(text, intent === "csv_edit");
     } catch (err: unknown) {
       return NextResponse.json(
         {
@@ -378,53 +425,89 @@ export async function POST(request: Request) {
       responseData.products as unknown as Record<string, unknown>[]
     ) as BrainResponse["products"];
 
-    // ── EDIT SAFETY: authorize → diff → restore unauthorized changes ──
-    // Only fields the user mentioned may change. Anything the model
-    // altered outside the authorized set is reverted to its original
-    // value. Numeric ops (set/scale) are computed in code, never by the model.
-    let editNote = "";
+    // ── Authorize early (needed by both merge + diff steps) ──
+    let editAuth: ReturnType<typeof authorizeEdit> | null = null;
     if (intent === "csv_edit" && hasProducts) {
-      let auth = authorizeEdit(prompt);
-
-      // LLM fallback for typos / other languages — try once before clarifying
-      if (!auth.hasFieldTarget) {
+      editAuth = authorizeEdit(prompt);
+      if (!editAuth.hasFieldTarget) {
         const resolved = await resolveFieldTargetLLM(prompt, deepseekKey || geminiKey);
         if (resolved) {
           if (resolved === "options") {
-            auth = { hasFieldTarget: true, fields: new Set(), touchesOptions: true, summary: "options" };
+            editAuth = { hasFieldTarget: true, fields: new Set(), touchesOptions: true, removeOptions: false, summary: "options" };
           } else {
-            auth = { hasFieldTarget: true, fields: new Set([resolved]), touchesOptions: false, summary: resolved };
+            editAuth = { hasFieldTarget: true, fields: new Set([resolved]), touchesOptions: false, removeOptions: false, summary: resolved };
           }
         }
       }
-
-      if (!auth.hasFieldTarget) {
+      if (!editAuth.hasFieldTarget) {
         return NextResponse.json({
           products: currentProducts as BrainResponse["products"],
-          assistantMessage: auth.reason,
-          clarifyingQuestion: auth.reason,
+          assistantMessage: editAuth.reason,
+          clarifyingQuestion: editAuth.reason,
         });
       }
+    }
 
+    // ── PATCH MERGE (edit mode) ──
+    // Smart option-aware merge: preserves originals' options the
+    // model didn't touch, only updates options by name or adds new
+    // ones. Spread-overwrite was destroying options the model omitted.
+    let editNote = "";
+    if (intent === "csv_edit" && hasProducts) {
+      const changed = responseData.products as unknown as Product[];
+      // Replicate new options catalog-wide only when the instruction
+      // suggests a broad scope ("all", "every", "category", "each")
+      const catalogWide =
+        /\b(all|every|each|category|categories|both|any)\b/i.test(prompt) ||
+        changed.filter((c) => (c.options || []).length > (currentProducts.find((o) => (o.id && o.id === c.id) || (o.name === c.name))?.options?.length ?? 0)).length >= 2;
+      const mergeResult = mergeProducts(
+        currentProducts,
+        changed,
+        editAuth?.removeOptions ?? false,
+        catalogWide
+      );
+      responseData.products = mergeResult.products as unknown as BrainResponse["products"];
+
+      // Post-merge sanity: did option count drop? If so, the model
+      // lost data — surface it but don't overwrite the user's work.
+      const beforeOptCount = currentProducts.reduce(
+        (s, p) => s + (p.options || []).length,
+        0
+      );
+      const afterOptCount = mergeResult.products.reduce(
+        (s, p) => s + (p.options || []).length,
+        0
+      );
+      if (afterOptCount < beforeOptCount && !editAuth?.removeOptions) {
+        editNote += ` ⚠️ ${beforeOptCount - afterOptCount} option(s) vanished during edit — review the grid before exporting.`;
+      }
+      if (mergeResult.addedOptions > 0 || mergeResult.updatedOptions > 0) {
+        editNote += ` Options: ${mergeResult.addedOptions} added, ${mergeResult.updatedOptions} updated, ${mergeResult.preservedOptions} preserved unchanged.`;
+      }
+    }
+
+    // ── EDIT SAFETY DEEP-DIFF & RESTORE ──
+    if (intent === "csv_edit" && hasProducts && editAuth) {
       // Apply deterministic numeric ops first (authorized by keyword)
       let patched = responseData.products as unknown as Product[];
       const numericOps = extractNumericOps(prompt);
       if (numericOps.length > 0) {
-        for (const op of numericOps) auth.fields.add(op.targetField);
+        for (const op of numericOps) editAuth.fields.add(op.targetField);
         patched = patched.map((p) => numericOps.reduce((acc, op) => applyNumericOp(acc, op), p));
         responseData.products = patched as unknown as BrainResponse["products"];
       }
 
       // Diff original vs result; revert anything not authorized
       const diffs = deepDiffProducts(currentProducts, responseData.products as unknown as Product[]);
-      const unauthorized = diffs.filter((d) => !auth.fields.has(d.rootField) && !auth.touchesOptions);
+      const unauthorized = diffs.filter((d) => !editAuth.fields.has(d.rootField) && !editAuth.touchesOptions);
+      console.log("[debug] editAuth fields:", [...editAuth.fields], "touchesOptions:", editAuth.touchesOptions, "inventory:", (responseData.products as unknown as Product[])[0]?.inventory, "unauth count:", unauthorized.length);
       if (unauthorized.length > 0) {
         responseData.products = restoreEntries(
           responseData.products as unknown as Product[],
           unauthorized
         ) as unknown as BrainResponse["products"];
         const paths = [...new Set(unauthorized.map((d) => d.path))].slice(0, 5).join(", ");
-        editNote = ` Preserved ${unauthorized.length} unmentioned field(s) the model tried to change (${paths}...).`;
+        editNote += ` Preserved ${unauthorized.length} unmentioned field(s) the model tried to change (${paths}...).`;
       }
     }
 

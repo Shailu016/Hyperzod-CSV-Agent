@@ -12,6 +12,14 @@ const cases: [string, boolean, string][] = [
   ["thanks", true, "chat"],
   ["create 10 pizzas", false, "csv_create"],
   ["give me 100 car products", false, "csv_create"],
+  // Question phrases that must NOT become edits
+  ["tell me the data of csv which i have uploaded", true, "chat"],
+  ["show me the products you added", true, "chat"],
+  ["what is the price of the first product", true, "chat"],
+  ["list the categories in the csv", true, "chat"],
+  ["describe what changed", true, "chat"],
+  ["how many products are loaded", true, "chat"],
+  ["update the price of the red shirt", true, "csv_edit"],
 ];
 
 let pass = true;

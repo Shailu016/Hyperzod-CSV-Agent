@@ -101,15 +101,26 @@ export function deterministicIntent(prompt: string, hasProducts: boolean): Inten
     // Products are loaded. Only genuine tool questions / greetings go to
     // chat — "what about raising prices?" is an edit instruction, not chat.
     if (/^(hello|hi|hey|thanks|thank you|thx)\b/.test(p)) return "chat";
-    const editWords =
-      /\b(fix|change|update|edit|modify|remove|delete|set|adjust|correct|repair|rename|clear|increase|decrease|add|remove all|raise|lower|price|product|item|sku|variant|option|category|csv|inventory|image|photo|picture)\b/;
-    if (editWords.test(p)) return "csv_edit";
+
+    // QUESTIONS about the data/tool → chat. Checked BEFORE editWords so
+    // "tell me about the csv" / "what is the price" are not treated as edits.
+    // Imperative edits ("update the price") don't start with these words;
+    // "what about X" (edit phrasing) is excluded via the "about" guard below.
     if (
-      /^(what|how|why|who|when|can you|do you|does|is there|are you)\b/.test(p) &&
-      /\b(you|this tool|the tool|it work|app|site|do)\b/.test(p)
+      /^(what|which|how|how many|how much|where|when|who|whose|why)\b/.test(p) &&
+      /\b(is|are|was|were|does|do|did|have|has|will|can)\b/.test(p) &&
+      !/\babout\b/.test(p)
     ) {
       return "chat";
     }
+    if (/^(tell me|show me|show|list|describe|explain|summarize|count|detail)\b/.test(p)) {
+      return "chat";
+    }
+
+    const editWords =
+      /\b(fix|change|update|edit|modify|remove|delete|set|adjust|correct|repair|rename|clear|increase|decrease|add|remove all|raise|lower|price|product|item|sku|variant|option|category|csv|inventory|image|photo|picture)\b/;
+    if (editWords.test(p)) return "csv_edit";
+
     return "csv_edit"; // default with loaded products: edit, not small talk
   }
 

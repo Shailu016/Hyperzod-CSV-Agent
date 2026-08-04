@@ -13,6 +13,8 @@ export interface EditAuthorization {
   fields: Set<string>;
   /** Authorized option/variant operations (e.g. "variant", "addon") */
   touchesOptions: boolean;
+  /** User explicitly asked to REMOVE an option/variant */
+  removeOptions: boolean;
   /** Clear natural-language summary for the report */
   summary: string;
   /** Why we can't proceed (when hasFieldTarget is false) */
@@ -151,11 +153,16 @@ export function authorizeEdit(prompt: string): EditAuthorization {
     OPTION_KEYWORDS.some((re) => re.test(prompt)) ||
     tokens.some(isOptionWord);
 
+  const removeOptions =
+    /\b(remove|delete|drop|cut)\b.{0,20}\b(option|variant|add-?on|addon)\b/i.test(prompt) ||
+    /\b(option|variant|add-?on|addon)\b.{0,20}\b(remove|delete|drop)\b/i.test(prompt);
+
   if (fields.size === 0 && !touchesOptions) {
     return {
       hasFieldTarget: false,
       fields,
       touchesOptions,
+      removeOptions,
       summary: "",
       reason:
         "I couldn't tell which field to change. Say what to change, e.g. 'set inventory to 10' or 'increase all prices by 10%'.",
@@ -166,7 +173,7 @@ export function authorizeEdit(prompt: string): EditAuthorization {
     (fields.size > 0 ? matched.join(", ") : "") +
     (touchesOptions ? (fields.size > 0 ? ", " : "") + "options/variants" : "");
 
-  return { hasFieldTarget: true, fields, touchesOptions, summary };
+  return { hasFieldTarget: true, fields, touchesOptions, removeOptions, summary };
 }
 
 /**
@@ -240,15 +247,15 @@ export interface NumericOp {
 
 const NUMERIC_PATTERNS: { re: RegExp; target: NumericOp["targetField"] }[] = [
   {
-    re: /(?:set|make|change|update).{0,20}(?:selling ?price|price|rate).{0,10}(?:to|=|:)?\s*(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d+)?)/i,
+    re: /\b(?:set|make|change|update)\b.{0,20}?\b(?:selling ?prices?|prices?|rates?)\b.{0,5}?(?:to|=|:)?\s*(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d+)?)/i,
     target: "sellingPrice",
   },
   {
-    re: /(?:set|make|change|update).{0,20}(?:cost ?price|cost).{0,10}(?:to|=|:)?\s*(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d+)?)/i,
+    re: /\b(?:set|make|change|update)\b.{0,20}?\b(?:cost ?prices?|cost)\b.{0,5}?(?:to|=|:)?\s*(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d+)?)/i,
     target: "costPrice",
   },
   {
-    re: /(?:set|make|change|update).{0,20}(?:inventory|stock).{0,10}(?:to|=|:)?\s*(\d+)/i,
+    re: /\b(?:set|make|change|update)\b.{0,20}?\b(?:inventory|stock)\b.{0,5}?(?:to|=|:)?\s*(\d+)/i,
     target: "inventory",
   },
 ];
