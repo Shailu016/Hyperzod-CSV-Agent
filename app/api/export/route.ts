@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ProductSchema } from "@/lib/schema";
 import { generateCSV } from "@/lib/generator";
+import { dedupeSkus } from "@/lib/dedupe-skus";
 
 export async function POST(request: Request) {
   try {
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const csv = generateCSV(parsed.data);
+    const csv = generateCSV(dedupeSkus(parsed.data));
 
     return new NextResponse(csv, {
       headers: {

@@ -1,3 +1,5 @@
+export {};
+
 const BASE = "http://localhost:3000";
 
 async function brain(prompt: string, products: unknown[]) {

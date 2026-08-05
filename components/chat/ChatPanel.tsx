@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { BrainResponse, Product } from "@/lib/schema";
 import AgentActivity from "@/components/AgentActivity";
 
@@ -38,7 +38,15 @@ export default function ChatPanel({
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = useCallback((text: string, index: number) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 1500);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -50,52 +58,110 @@ export default function ChatPanel({
 
     setLoading(true);
     onStatusChange("loading");
-
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: trimmed, timestamp: Date.now() },
-    ]);
-
     setInput("");
 
+    // Rolling history — accumulated across auto-continue loops so
+    // the brain sees past batch-progress messages.
+    let rollingHistory: ChatMessage[] = [
+      ...messages,
+      { role: "user", content: trimmed, timestamp: Date.now() },
+    ];
+    setMessages(rollingHistory);
+
+    let promptText = trimmed;
+    let currentProducts = products;
+
     try {
-      const history = messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      // Loop until the batch is complete (no "continue" prompt in response)
+      for (let iteration = 0; iteration < 30; iteration++) {
+        const history = rollingHistory.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
 
-      const res = await fetch("/api/brain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: trimmed,
-          currentProducts: products,
-          history,
-        }),
-      });
+        const res = await fetch("/api/brain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: promptText,
+            currentProducts,
+            history,
+          }),
+        });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || err.error || "Request failed");
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.message || err.error || "Request failed");
+        }
+
+        const data: BrainResponse = await res.json();
+        currentProducts = data.products;
+        onProductsUpdate(
+          data.products,
+          data.assistantMessage,
+          data.clarifyingQuestion
+        );
+
+        // Detect partial batch result: message contains "continue" hint
+        const needsContinue =
+          /Say\s+\*\*"continue"\*\*|\*\*"more"\*\*\s+to\s+build/i.test(
+            data.assistantMessage
+          );
+
+        if (!needsContinue) {
+          // Done — add final assistant message
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: data.assistantMessage,
+              clarifyingQuestion: data.clarifyingQuestion,
+              timestamp: Date.now(),
+            },
+          ]);
+          break;
+        }
+
+        // Auto-continue: add progress to rolling history for next call
+        const batchMatch = data.assistantMessage.match(
+          /\*\*Batch\s+(\d+\/\d+)\s+done\*\*/
+        );
+        const progressLine = batchMatch
+          ? `⏳ Batch ${batchMatch[1]} done — auto-continuing...`
+          : "⏳ Auto-continuing next batch...";
+
+        rollingHistory = [
+          ...rollingHistory,
+          {
+            role: "assistant",
+            content: data.assistantMessage,
+            timestamp: Date.now(),
+          },
+          {
+            role: "user",
+            content: progressLine,
+            timestamp: Date.now(),
+          },
+        ];
+
+        // Show progress as a single assistant message (replaces previous progress)
+        setMessages((prev) => {
+          const withoutLast = prev.filter(
+            (m) => !m.content.includes("auto-continuing")
+          );
+          return [
+            ...withoutLast,
+            {
+              role: "assistant",
+              content: progressLine,
+              timestamp: Date.now(),
+            },
+          ];
+        });
+
+        // Switch prompt to "continue" for the next API call
+        promptText = "continue";
       }
-
-      const data: BrainResponse = await res.json();
-
-      onProductsUpdate(
-        data.products,
-        data.assistantMessage,
-        data.clarifyingQuestion
-      );
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: data.assistantMessage,
-          clarifyingQuestion: data.clarifyingQuestion,
-          timestamp: Date.now(),
-        },
-      ]);
 
       onStatusChange("idle");
     } catch (err: unknown) {
@@ -161,9 +227,9 @@ export default function ChatPanel({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-6 space-y-4">
         {messages.map((msg, i) => (
-          <ChatBubble key={i} message={msg} />
+          <ChatBubble key={i} message={msg} index={i} copiedIndex={copiedIndex} onCopy={handleCopy} />
         ))}
         {loading && <AgentActivity active={loading} />}
         <div ref={messagesEndRef} />
@@ -211,13 +277,24 @@ export default function ChatPanel({
   );
 }
 
-function ChatBubble({ message }: { message: ChatMessage }) {
+function ChatBubble({
+  message,
+  index,
+  copiedIndex,
+  onCopy,
+}: {
+  message: ChatMessage;
+  index: number;
+  copiedIndex: number | null;
+  onCopy: (text: string, index: number) => void;
+}) {
   const isUser = message.role === "user";
+  const isCopied = copiedIndex === index;
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[90%] rounded-2xl px-4 py-3 ${
+        className={`max-w-[90%] rounded-2xl px-4 py-3 relative group ${
           isUser
             ? "bg-white/10 border border-white/20 text-white"
             : "bg-slate-800/60 border border-white/10 text-slate-200"
@@ -233,7 +310,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
             </span>
           </div>
         )}
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+        <p className="text-sm leading-relaxed whitespace-pre-wrap pr-5">
           {message.content}
         </p>
         {message.clarifyingQuestion && (
@@ -243,6 +320,17 @@ function ChatBubble({ message }: { message: ChatMessage }) {
             </p>
           </div>
         )}
+        <button
+          onClick={() => onCopy(message.content, index)}
+          className={`absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center text-[10px] transition-all ${
+            isCopied
+              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+              : "bg-white/5 border border-white/10 text-slate-500 opacity-0 group-hover:opacity-100 hover:bg-white/10 hover:text-white hover:border-white/20"
+          }`}
+          title={isCopied ? "Copied!" : "Copy"}
+        >
+          <i className={`fas ${isCopied ? "fa-check" : "fa-copy"}`}></i>
+        </button>
         <span className="text-[10px] text-slate-500 mt-1.5 block">
           {new Date(message.timestamp).toLocaleTimeString([], {
             hour: "2-digit",

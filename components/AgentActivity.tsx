@@ -68,6 +68,10 @@ export default function AgentActivity({ active }: AgentActivityProps) {
           <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:150ms]"></span>
           <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:300ms]"></span>
         </div>
+        <p className="text-[10px] text-amber-400/60 mt-2 pl-5">
+          <i className="fas fa-triangle-exclamation mr-1"></i>
+          Please do not refresh the page while generation is in progress.
+        </p>
       </div>
     </div>
   );

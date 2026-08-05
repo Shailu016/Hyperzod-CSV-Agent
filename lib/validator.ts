@@ -38,7 +38,7 @@ export function validateProducts(products: Product[]): ValidationResult {
       errors.push({ rowIndex: i, field: "name", message: "Product name is required" });
     }
 
-    if (p.sellingPrice == null || p.sellingPrice === 0) {
+    if (p.sellingPrice == null) {
       errors.push({ rowIndex: i, field: "sellingPrice", message: "Selling price is required" });
     }
 
@@ -46,7 +46,7 @@ export function validateProducts(products: Product[]): ValidationResult {
       errors.push({ rowIndex: i, field: "sellingPrice", message: "Selling price must be a number" });
     }
 
-    if (p.costPrice == null || p.costPrice <= 0) {
+    if (p.costPrice == null) {
       errors.push({
         rowIndex: i,
         field: "costPrice",

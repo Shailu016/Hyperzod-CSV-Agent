@@ -20,6 +20,15 @@ function isValidUrl(value: unknown): string {
   return "";
 }
 
+/** Accept number or numeric string ("199", "₹199", "Rs. 1,299"). */
+function toNum(value: unknown): number | undefined {
+  if (typeof value === "number") return isFinite(value) ? value : undefined;
+  if (typeof value !== "string") return undefined;
+  const cleaned = value.replace(/[₹,\s]/g, "").replace(/^rs\.?/i, "");
+  const n = parseFloat(cleaned);
+  return isFinite(n) ? n : undefined;
+}
+
 export function normalizeVariant(
   v: Record<string, unknown>,
   parentType?: "single" | "multiple",
@@ -32,16 +41,13 @@ export function normalizeVariant(
     : [];
   return {
     name: typeof v.name === "string" && v.name.trim() ? v.name : "Variant",
-    price: typeof v.price === "number" && isFinite(v.price) ? v.price : 0,
-    costPrice:
-      typeof v.costPrice === "number" && isFinite(v.costPrice)
-        ? v.costPrice
-        : undefined,
+    price: toNum(v.price) ?? 0,
+    costPrice: toNum(v.costPrice),
     inventory:
-      typeof v.inventory === "number" && isFinite(v.inventory)
-        ? Math.round(v.inventory)
-        : typeof v.minQty === "number" && isFinite(v.minQty)
-          ? Math.round(v.minQty)
+      toNum(v.inventory) != null
+        ? Math.round(toNum(v.inventory)!)
+        : toNum(v.minQty) != null
+          ? Math.round(toNum(v.minQty)!)
           : 0,
     description:
       typeof v.description === "string" ? v.description : "",
@@ -79,15 +85,7 @@ export function normalizeOption(
 }
 
 export function normalizeProduct(p: Record<string, unknown>): Product {
-  const sellingPrice =
-    typeof p.sellingPrice === "number" && isFinite(p.sellingPrice)
-      ? p.sellingPrice
-      : 0;
-  const rawCost =
-    typeof p.costPrice === "number" && isFinite(p.costPrice)
-      ? p.costPrice
-      : 0;
-
+  const sellingPrice = toNum(p.sellingPrice) ?? 0;
   const rawOptions = Array.isArray(p.options) ? p.options : [];
 
   return {
@@ -100,28 +98,16 @@ export function normalizeProduct(p: Record<string, unknown>): Product {
     sku: typeof p.sku === "string" ? p.sku : "",
     sellingPrice,
     costPrice:
-      rawCost > 0 ? round2(rawCost) : round2(sellingPrice * 0.4),
-    priceCompare:
-      typeof p.priceCompare === "number" && isFinite(p.priceCompare)
-        ? p.priceCompare
-        : undefined,
-    minQty:
-      typeof p.minQty === "number" && isFinite(p.minQty)
-        ? p.minQty
-        : undefined,
-    maxQty:
-      typeof p.maxQty === "number" && isFinite(p.maxQty)
-        ? p.maxQty
-        : undefined,
-    taxPercent:
-      typeof p.taxPercent === "number" && isFinite(p.taxPercent)
-        ? p.taxPercent
-        : undefined,
+      toNum(p.costPrice) != null
+        ? round2(toNum(p.costPrice)!)
+        : round2(sellingPrice * 0.4),
+    priceCompare: toNum(p.priceCompare),
+    minQty: toNum(p.minQty),
+    maxQty: toNum(p.maxQty),
+    taxPercent: toNum(p.taxPercent),
     status: p.status === "inactive" ? "inactive" : "active",
     inventory:
-      typeof p.inventory === "number" && isFinite(p.inventory)
-        ? Math.round(p.inventory)
-        : undefined,
+      toNum(p.inventory) != null ? Math.round(toNum(p.inventory)!) : undefined,
     labels: Array.isArray(p.labels)
       ? p.labels.filter((l: unknown) => typeof l === "string")
       : [],
