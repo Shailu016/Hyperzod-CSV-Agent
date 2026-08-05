@@ -74,9 +74,24 @@ function splitVariants(field: string): string[] {
   const chunks: string[] = [];
   let current = "";
   let braceDepth = 0;
+  let inQuotes = false;
 
-  for (const char of field) {
-    if (char === "{") {
+  for (let i = 0; i < field.length; i++) {
+    const char = field[i];
+    if (inQuotes) {
+      if (char === '"' && field[i + 1] === '"') {
+        current += char;
+        i++;
+      } else if (char === '"') {
+        inQuotes = false;
+        current += char;
+      } else {
+        current += char;
+      }
+    } else if (char === '"') {
+      inQuotes = true;
+      current += char;
+    } else if (char === "{") {
       braceDepth++;
       current += char;
     } else if (char === "}") {
@@ -227,8 +242,27 @@ function parseVariantString(text: string): ProductVariant | null {
     working = (working.slice(0, startIdx) + working.slice(endIdx + 1)).trim();
   }
 
-  const tokens = working.split(",").map((t: string) => t.trim());
+  // Quote-aware split: a quoted description ("desc, with commas") stays
+  // one token; unquoted commas inside descriptions would shift fields.
+  const tokens = splitQuoted(working);
   if (tokens.length === 0 || !tokens[0]) return null;
+
+  // If the description was NOT quoted, extra tokens piled up past the
+  // 6 known fields (name, price, cost, inventory, desc, imageUrl).
+  // Heuristic: the LAST token is the imageUrl slot (URL or empty) —
+  // everything between inventory and it belongs to the description.
+  let description = tokens[4] ?? "";
+  let imageUrl = tokens[5] ?? "";
+  if (tokens.length > 6) {
+    const last = tokens[tokens.length - 1] ?? "";
+    const lastIsUrl = /^https?:\/\//i.test(last);
+    const lastIsEmpty = last.trim() === "";
+    imageUrl = lastIsUrl ? last : "";
+    description = tokens
+      .slice(4, lastIsUrl || lastIsEmpty ? -1 : undefined)
+      .join(",")
+      .trim();
+  }
 
   const variantCost = parseFloat(tokens[2]);
 
@@ -237,8 +271,8 @@ function parseVariantString(text: string): ProductVariant | null {
     price: parseFloat(tokens[1]) || 0,
     costPrice: isNaN(variantCost) ? undefined : variantCost,
     inventory: parseInt(tokens[3], 10) || 0,
-    description: tokens[4] ?? "",
-    imageUrl: tokens[5] ?? "",
+    description,
+    imageUrl,
     nestedOptions: nestedOptions.length > 0 ? nestedOptions : undefined,
   };
 }

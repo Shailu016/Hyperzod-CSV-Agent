@@ -31,27 +31,24 @@ function csvRow(values: (string | number | null | undefined)[]): string {
 }
 
 /**
- * Variant strings are comma-delimited with NO escaping support on the
- * Hyperzod side. A comma (or the " ; " variant separator) inside a
- * description/name shifts every following field and corrupts the row
- * (e.g. a description fragment landing in imageUrl -> "must be a valid
- * URL"). Neutralize them before writing.
+ * Variant strings are comma-delimited. Text fields containing commas,
+ * semicolons or quotes are quoted ("" escapes) so the description stays
+ * in its own field instead of shifting every following field (which put
+ * description fragments into imageUrl -> "must be a valid URL").
  */
-function sanitizeVariantText(value: string): string {
-  return value
-    .replace(/ ?; ?/g, " - ")
-    .replace(/,/g, " - ")
-    .replace(/[\r\n]+/g, " ")
-    .trim();
+function quoteVariantField(value: string): string {
+  const cleaned = value.replace(/[\r\n]+/g, " ").trim();
+  if (/[,;"]/.test(cleaned)) return `"${cleaned.replace(/"/g, '""')}"`;
+  return cleaned;
 }
 
 function serializeVariant(v: ProductVariant): string {
   const parts = [
-    sanitizeVariantText(v.name),
+    quoteVariantField(v.name),
     fmtPrice(v.price),
     fmtPrice(v.costPrice ?? 0),
     v.inventory ?? 0,
-    sanitizeVariantText(v.description ?? ""),
+    quoteVariantField(v.description ?? ""),
     v.imageUrl ?? "",
   ];
 
@@ -74,7 +71,7 @@ function serializeNestedOption(o: ProductOption): string {
     .map((v: ProductVariant) => serializeVariant(v))
     .join(" ; ");
 
-  return `{ ${sanitizeVariantText(o.name)},${o.type === "single" ? "single" : "multiple"},${
+  return `{ ${quoteVariantField(o.name)},${o.type === "single" ? "single" : "multiple"},${
     o.enableRange ? "yes" : "no"
   },${rangeStr},${o.required ? "yes" : "no"},${o.view} (${variantsStr} ) }`;
 }

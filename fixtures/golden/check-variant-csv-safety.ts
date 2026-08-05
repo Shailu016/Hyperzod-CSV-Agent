@@ -26,11 +26,11 @@ const products = [
               "An expression of understated luxury. Rose Royale pairs intricate rose gold craftsmanship with sheer elegance, making it a graceful choice for refined.",
           },
           {
-            name: "Imperfect, {broken} ; text",
+            name: "With, comma in name",
             price: 0,
             costPrice: 0,
             inventory: 100,
-            description: "line1\nline2 with a, comma and ; semicolon",
+            description: "line1\nline2 with a, comma and ; semicolon and \"quote\"",
           },
         ],
       },
@@ -39,8 +39,8 @@ const products = [
 ];
 
 const csv = generateCSV(products as never);
-console.log("--- CSV row 2 (first 350 chars) ---");
-console.log((csv.split(/\r?\n/)[1] || "").slice(0, 350));
+console.log("--- CSV row 2 ---");
+console.log((csv.split(/\r?\n/)[1] || "").slice(0, 400));
 console.log("");
 
 const reparsed = parseCSV(csv);
@@ -48,25 +48,31 @@ if (reparsed.length !== 1) {
   console.error("FAIL: round-trip lost products");
   process.exit(1);
 }
-
 const opts = reparsed[0].options ?? [];
 if (opts.length !== 1 || (opts[0].variants || []).length !== 2) {
-  console.error("FAIL: round-trip lost variants:", JSON.stringify(opts, null, 1));
+  console.error("FAIL: round-trip lost variants");
   process.exit(1);
 }
 const [v1, v2] = opts[0].variants;
 
-for (const v of [v1, v2]) {
-  // Longest text is the description field (position 4) — a correct parse
-  // means the comma/semicolon-heavy text stayed in the description slot.
-  const fields = [v.name, String(v.price), String(v.costPrice ?? ""), String(v.inventory ?? ""), v.description ?? "", v.imageUrl ?? ""];
-  if (fields.length !== 6) {
-    console.error("FAIL: unexpected field count", fields);
-    process.exit(1);
-  }
+const expected1 =
+  "An expression of understated luxury. Rose Royale pairs intricate rose gold craftsmanship with sheer elegance, making it a graceful choice for refined.";
+if ((v1.description ?? "").trim() !== expected1) {
+  console.error("FAIL: v1 description corrupted after round-trip");
+  console.error("got: ", v1.description);
+  process.exit(1);
+}
+if (v2.name !== "With, comma in name") {
+  console.error("FAIL: v2 name with comma corrupted:", v2.name);
+  process.exit(1);
+}
+if ((v2.description ?? "").indexOf("a, comma and ; semicolon") === -1) {
+  console.error("FAIL: v2 description corrupted:", v2.description);
+  process.exit(1);
+}
+if (v1.imageUrl || v2.imageUrl) {
+  console.error("FAIL: imageUrl slots polluted:", v1.imageUrl, v2.imageUrl);
+  process.exit(1);
 }
 
-console.log("v1.description:", (v1.description ?? "").slice(0, 60), "...");
-console.log("v2.name:", v2.name);
-console.log("v2.description:", v2.description ?? "");
-console.log("PASS: comma/semicolon text stays inside its field after round-trip");
+console.log("PASS: quoted comma descriptions survive round-trip (export + import)");
