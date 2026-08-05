@@ -30,13 +30,28 @@ function csvRow(values: (string | number | null | undefined)[]): string {
     .join(",");
 }
 
+/**
+ * Variant strings are comma-delimited with NO escaping support on the
+ * Hyperzod side. A comma (or the " ; " variant separator) inside a
+ * description/name shifts every following field and corrupts the row
+ * (e.g. a description fragment landing in imageUrl -> "must be a valid
+ * URL"). Neutralize them before writing.
+ */
+function sanitizeVariantText(value: string): string {
+  return value
+    .replace(/ ?; ?/g, " - ")
+    .replace(/,/g, " - ")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+}
+
 function serializeVariant(v: ProductVariant): string {
   const parts = [
-    v.name,
+    sanitizeVariantText(v.name),
     fmtPrice(v.price),
     fmtPrice(v.costPrice ?? 0),
     v.inventory ?? 0,
-    v.description ?? "",
+    sanitizeVariantText(v.description ?? ""),
     v.imageUrl ?? "",
   ];
 
@@ -59,7 +74,7 @@ function serializeNestedOption(o: ProductOption): string {
     .map((v: ProductVariant) => serializeVariant(v))
     .join(" ; ");
 
-  return `{ ${o.name},${o.type === "single" ? "single" : "multiple"},${
+  return `{ ${sanitizeVariantText(o.name)},${o.type === "single" ? "single" : "multiple"},${
     o.enableRange ? "yes" : "no"
   },${rangeStr},${o.required ? "yes" : "no"},${o.view} (${variantsStr} ) }`;
 }
