@@ -230,10 +230,12 @@ function parseVariantString(text: string): ProductVariant | null {
   const tokens = working.split(",").map((t: string) => t.trim());
   if (tokens.length === 0 || !tokens[0]) return null;
 
+  const variantCost = parseFloat(tokens[2]);
+
   return {
     name: tokens[0],
     price: parseFloat(tokens[1]) || 0,
-    costPrice: parseFloat(tokens[2]) || undefined,
+    costPrice: isNaN(variantCost) ? undefined : variantCost,
     inventory: parseInt(tokens[3], 10) || 0,
     description: tokens[4] ?? "",
     imageUrl: tokens[5] ?? "",
@@ -298,14 +300,15 @@ export function parseCSV(csvText: string): Product[] {
       if (opt) options.push(opt);
     }
 
-    const costCell = parseFloat(row["PRODUCT.PRICE.COST"] || "0");
+    const rawCost = row["PRODUCT.PRICE.COST"]?.trim();
+    const costCell = rawCost ? parseFloat(rawCost) : NaN;
     const product: Product = {
       id: row["PRODUCT.ID"] || undefined,
       name,
       description: row["PRODUCT.DESCRIPTION"] || "",
       sku: row["PRODUCT.SKU"] || "",
       sellingPrice: parseFloat(row["PRODUCT.PRICE.SELLING"] || "0") || 0,
-      costPrice: costCell > 0 ? costCell : undefined,
+      costPrice: isNaN(costCell) ? undefined : costCell,
       priceCompare:
         parseFloat(row["PRODUCT.PRICE.COMPARE"] || "0") || undefined,
       minQty:
