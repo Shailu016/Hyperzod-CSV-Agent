@@ -32,7 +32,7 @@ const cases: Array<{ label: string; input: Record<string, unknown> }> = [
 for (const c of cases) {
   const p = normalizeProduct(c.input);
   console.log(
-    `${c.label.padEnd(30)} selling=${p.sellingPrice} cost=${p.costPrice} opts=${p.options.length}`
+    `${c.label.padEnd(30)} selling=${p.sellingPrice} cost=${p.costPrice} opts=${(p.options ?? []).length}`
   );
 }
 
@@ -52,7 +52,8 @@ if (d.sellingPrice !== 0 || d.costPrice !== 0) {
   process.exit(1);
 }
 const e = normalizeProduct(cases[4].input);
-if (e.options[0]?.variants[0]?.price !== 50 || e.options[0]?.variants[0]?.costPrice !== 25) {
+const eVar = e.options?.[0]?.variants?.[0];
+if (eVar?.price !== 50 || eVar?.costPrice !== 25) {
   console.error("FAIL: variant string prices not coerced");
   process.exit(1);
 }
